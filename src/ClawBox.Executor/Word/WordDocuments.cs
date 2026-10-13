@@ -85,6 +85,45 @@ public sealed class WordDocuments(ExecutorOptions options)
         return (output, count);
     }
 
+    public (byte[] Bytes, int Paragraphs) Format(byte[] bytes, System.Text.Json.JsonElement arguments, CancellationToken cancellation)
+    {
+        WordFormatting.Validate(arguments); ValidatePackage(bytes);
+        using MemoryStream stream = new(); stream.Write(bytes); stream.Position = 0; int count = 0;
+        using (WordprocessingDocument document = WordprocessingDocument.Open(stream, true,
+            new OpenSettings { MaxCharactersInPart = options.MaxExpandedDocumentBytes }))
+        {
+            if (document.DocumentType != WordprocessingDocumentType.Document) throw InvalidDocument();
+            MainDocumentPart main = document.MainDocumentPart ?? throw InvalidDocument();
+            Body body = main.Document?.Body ?? throw InvalidDocument();
+            if (WordFormatting.Get(arguments, "style") is string style) EnsureStyle(main, style);
+            foreach (Paragraph paragraph in body.Descendants<Paragraph>())
+            {
+                cancellation.ThrowIfCancellationRequested();
+                if (WordFormatting.Get(arguments, "scope") == "paragraph" && paragraph.InnerText != WordFormatting.Get(arguments, "text")) continue;
+                WordFormatting.Apply(paragraph, arguments); count++;
+            }
+            if (count == 0) throw new ExecutorException("paragraph_not_found", 422, "No matching body/table paragraph was found; the document was not changed.");
+            main.Document!.Save();
+        }
+        byte[] output = stream.ToArray(); ValidatePackage(output); return (output, count);
+    }
+    private static void EnsureStyle(MainDocumentPart main, string id)
+    {
+        StyleDefinitionsPart part = main.StyleDefinitionsPart ?? main.AddNewPart<StyleDefinitionsPart>();
+        Styles styles = part.Styles ??= new();
+        if (styles.Elements<Style>().Any(s => s.StyleId?.Value == id)) return;
+        Style style = new() { Type = StyleValues.Paragraph, StyleId = id, CustomStyle = false };
+        style.Append(new StyleName { Val = id }, new PrimaryStyle());
+        if (id.StartsWith("Heading", StringComparison.Ordinal))
+        {
+            int level = int.Parse(id[^1..], System.Globalization.CultureInfo.InvariantCulture);
+            style.Append(new StyleParagraphProperties(new KeepNext(), new OutlineLevel { Val = level - 1 }),
+                new StyleRunProperties(new Bold(), new FontSize { Val = (36 - (level - 1) * 4).ToString(System.Globalization.CultureInfo.InvariantCulture) }));
+        }
+        else if (id == "Title") style.Append(new StyleRunProperties(new FontSize { Val = "48" }));
+        styles.Append(style); styles.Save();
+    }
+
     private static int ReplaceSegment(List<Text> nodes, string search, string replacement, int maxChars)
     {
         string combined = string.Concat(nodes.Select(t => t.Text));

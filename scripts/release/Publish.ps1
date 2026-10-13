@@ -49,6 +49,7 @@ $version = ([xml](Get-Content (Join-Path $repoRoot 'Directory.Build.props') -Raw
 & (Join-Path $PSScriptRoot 'Test-Package.ps1') -Path $staging -Runtime $Runtime -RequireManifest
 Assert-PublishPath $output
 Assert-PublishPath $staging
+New-Item -ItemType Directory -Path $publishRoot -Force | Out-Null
 if (Test-Path -LiteralPath $output) {
     Assert-PublishPath $previous
     New-Item -ItemType Directory -Path (Split-Path $previous -Parent) -Force | Out-Null

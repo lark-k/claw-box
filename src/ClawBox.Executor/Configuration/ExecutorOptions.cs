@@ -14,6 +14,7 @@ public sealed class ExecutorOptions
     public int MaxExpandedDocumentBytes { get; set; } = 64 * 1024 * 1024;
     public int MaxQueuedTasks { get; set; } = 100;
     public int MaxPendingRequests { get; set; } = 100;
+    public string ProjectRuntimeFile { get; set; } = "";
 
     public void Validate()
     {

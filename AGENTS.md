@@ -1,5 +1,7 @@
 # Repository instructions
 
+- Work directly on the user's main branch. Do not create branches unless explicitly requested.
+
 - Read README.md and relevant architecture/API documents before changing behavior.
 - Source belongs in src/, tests in tests/, architecture and runbooks in docs/, automation in scripts/.
 - Never commit credentials, user documents, SQLite state, SDK binaries or build outputs.

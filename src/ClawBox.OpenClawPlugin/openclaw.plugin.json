@@ -1,14 +1,24 @@
 {
   "id": "clawbox-windows",
   "name": "ClawBox Windows tools",
-  "description": "Windows files and DOCX through a pinned SSH tunnel and exact local approvals.",
-  "contracts": { "tools": ["windows_file_read", "windows_file_write", "windows_word_read", "windows_word_create", "windows_word_replace"] },
+  "description": "Windows office and code project tools through a pinned SSH tunnel and exact local approvals.",
+  "contracts": { "tools": ["windows_file_read", "windows_file_write", "windows_word_read", "windows_word_create", "windows_word_replace", "windows_project_list", "windows_project_check", "windows_directory_create", "windows_directory_list", "windows_file_info", "windows_file_search", "windows_file_copy", "windows_file_move", "windows_file_replace", "windows_word_format"] },
   "toolMetadata": {
     "windows_file_read": { "optional": true },
     "windows_file_write": { "optional": true },
     "windows_word_read": { "optional": true },
     "windows_word_create": { "optional": true },
-    "windows_word_replace": { "optional": true }
+    "windows_word_replace": { "optional": true },
+    "windows_project_list": { "optional": true },
+    "windows_project_check": { "optional": true },
+    "windows_directory_create": { "optional": true },
+    "windows_directory_list": { "optional": true },
+    "windows_file_info": { "optional": true },
+    "windows_file_search": { "optional": true },
+    "windows_file_copy": { "optional": true },
+    "windows_file_move": { "optional": true },
+    "windows_file_replace": { "optional": true },
+    "windows_word_format": { "optional": true }
   },
   "configSchema": {
     "type": "object",

@@ -41,6 +41,16 @@ public sealed class PathPolicy(ExecutorOptions options)
         return full;
     }
 
+    public string ResolveDirectory(string path)
+    {
+        if (!Path.IsPathFullyQualified(path)) throw Denied();
+        string full = Path.GetFullPath(path);
+        // The synthetic child preserves every ancestor/link check without enabling file writes to a root.
+        if (options.AllowedRoots.Any(root => string.Equals(Path.TrimEndingDirectorySeparator(Path.GetFullPath(root)), Path.TrimEndingDirectorySeparator(full), Comparison)))
+            return Path.GetDirectoryName(Resolve(Path.Combine(full, ".clawbox-directory-check")))!;
+        return Resolve(full);
+    }
+
     private static bool IsWithin(string path, string root)
     {
         root = Path.TrimEndingDirectorySeparator(root);

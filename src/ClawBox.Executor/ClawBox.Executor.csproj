@@ -5,6 +5,8 @@
     <PackageReference Include="DocumentFormat.OpenXml" />
   </ItemGroup>
   <ItemGroup>
+    <EmbeddedResource Include="Projects/NodeBootstrap.cjs" LogicalName="NodeBootstrap" />
+    <EmbeddedResource Include="Projects/Java/QuantumFileSystemProvider.java" LogicalName="JavaFilesystemProvider" />
     <Content Update="appsettings.*.json;**/*.secrets.json;.env;.env.*"
              CopyToOutputDirectory="Never" CopyToPublishDirectory="Never" />
     <None Update="appsettings.*.json;**/*.secrets.json;.env;.env.*"

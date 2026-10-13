@@ -4,7 +4,7 @@
 
 `%LOCALAPPDATA%/ClawBox/executor/` 保存 SQLite 和两种开发 token。启动脚本为该目录配置当前 Windows 用户 ACL，不输出 token。不要将该目录上传仓库或打包进发布产物。
 
-启动脚本在前台运行执行器，Ctrl+C 关闭。当前没有安装 Windows 服务或计划任务，也没有自动启动桌面应用。生产安装器和随 APP 启动属于后续交付。
+命令行启动脚本在前台运行执行器，Ctrl+C 关闭。Quantum Harness 启动自己拥有的执行器和 SSH 进程，隐藏后台窗口，并在 APP 正常退出时清理。当前没有安装 Windows 服务、计划任务或开机自启动。
 
 ## 依赖
 
@@ -21,6 +21,8 @@ SDK 私有安装在用户目录，global.json 固定功能带并允许补丁。C
 发布先写入 `artifacts/releases/staging/`，验证 PE 头、运行时 JSON、私密文件排除和 SHA-256 清单后才更新 `artifacts/publish/<架构>/`。前一份目录移至 `artifacts/releases/previous/`；失败的临时目录保留以便排查。以上目录均被 Git 忽略，可由维护者定期清理。
 
 `scripts/ci/Test-Publish.ps1` 使用无密钥的临时配置验证发布排除，再启动发布后的 EXE，验证健康端点和五个文件/DOCX 工具。配置 `appsettings.*.json` 和 `*.secrets.json` 不复制到构建或发布输出，部署参数通过环境提供。
+
+`Publish-Desktop.ps1` 发布完整 Quantum Harness 包；`Test-DesktopPublish.ps1` 验证完整性并通过不连接真实盒子的 mock 状态渲染聊天、审批和紧凑窗口。其截图不代表真实模型验收；真实链路记录见第八阶段验证文档。桌面连接及私有凭据位置见 phase-8.md。
 
 ## 故障排查
 

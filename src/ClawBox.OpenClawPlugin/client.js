@@ -4,6 +4,18 @@ import { isAbsolute } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
 const terminalTasks = new Set(['succeeded', 'failed', 'canceled', 'interrupted']);
+class ExecutorHttpError extends Error {
+  constructor(status, code) { super(`executor_http_${status}`); this.status = status; this.code = code; }
+}
+const safeCodes = new Set(['invalid_arguments', 'unknown_tool', 'path_denied', 'input_too_large', 'file_conflict', 'queue_full', 'request_conflict', 'request_not_found']);
+const guidance = {
+  directory_missing: 'The parent directory does not exist. Discover and request the directory creation tool before writing a new file.',
+  file_conflict: 'File changed or destination exists. Read current file/hash first; do not overwrite an unrelated destination.',
+  search_not_found: 'No literal match; file unchanged. Read the current content before proposing another edit.',
+  paragraph_not_found: 'No exact matching paragraph; document unchanged. Read the current paragraph text first.',
+  unsupported_text_encoding: 'The file is not supported UTF-8 text. Use Word tools for DOCX; do not overwrite binary files with text.',
+  project_runtime_missing: 'The matching local SDK/runtime is not configured. Ask the human to configure it; never bypass isolation with shell execution.',
+};
 
 export function loadConfiguration(config) {
   const port = config.port ?? 18791;
@@ -39,7 +51,11 @@ export class ExecutorClient {
     });
     if (!response.ok) {
       // Never relay a server response body: it may contain content or deployment details.
-      throw new Error(`executor_http_${response.status}`);
+      let code;
+      if (response.status >= 400 && response.status < 500) {
+        try { const body = await response.json(); if (safeCodes.has(body.code)) code = body.code; } catch { /* No public error code. */ }
+      }
+      throw new ExecutorHttpError(response.status, code);
     }
     const bytes = await response.arrayBuffer();
     if (bytes.byteLength > 32 * 1024 * 1024) throw new Error('executor_response_too_large');
@@ -62,12 +78,20 @@ export class ExecutorClient {
         }
         if (request.task && terminalTasks.has(request.task.status)) {
           return result({ requestId, taskId: request.task.id, status: request.task.status,
-            result: request.task.result, errorCode: request.task.errorCode }, request.task.status !== 'succeeded');
+            result: request.task.result, errorCode: request.task.errorCode,
+            message: request.task.status === 'failed' ? guidance[request.task.errorCode] ?? 'Tool execution failed. Check its error code; do not claim success.' : undefined }, request.task.status !== 'succeeded');
         }
         await delay(this.pollMilliseconds, undefined, { signal: lifetime });
         request = await this.request('GET', route, undefined, lifetime);
       }
-    } catch {
+    } catch (error) {
+      // A completed initial 4xx response (except timeout) means nothing was admitted.
+      // A later polling error or transport loss still has an unknown outcome.
+      if (request === undefined && error instanceof ExecutorHttpError && error.status >= 400 && error.status < 500 && error.status !== 408) {
+        return result({ requestId, status: 'not_submitted', httpStatus: error.status,
+          errorCode: error.code ?? `executor_http_${error.status}`,
+          message: 'Executor rejected this request before approval or execution. Check the tool schema, workspace and arguments. No file change occurred; do not claim success.' }, true);
+      }
       // Cancellation is best effort. A completed write remains committed. Never POST the tool again.
       try { await this.request('POST', `${route}/cancel`, {}, AbortSignal.timeout(2000)); } catch { /* Tunnel may be down. */ }
       return result({ requestId, status: 'outcome_unknown',

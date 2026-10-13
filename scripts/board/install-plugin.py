@@ -11,7 +11,9 @@ import time
 
 PLUGIN_ID = "clawbox-windows"
 TOOLS = ["windows_file_read", "windows_file_write", "windows_word_read",
-         "windows_word_create", "windows_word_replace"]
+         "windows_word_create", "windows_word_replace", "windows_project_list", "windows_project_check",
+         "windows_directory_create", "windows_directory_list", "windows_file_info", "windows_file_search",
+         "windows_file_copy", "windows_file_move", "windows_file_replace", "windows_word_format"]
 FILES = ("package.json", "openclaw.plugin.json", "index.js", "client.js")
 
 

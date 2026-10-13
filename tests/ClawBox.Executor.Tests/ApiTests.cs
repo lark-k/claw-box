@@ -95,6 +95,23 @@ public sealed class ApiTests
     }
 
     [Fact]
+    public async Task Directory_creation_waits_for_exact_approval_before_creating_any_parent()
+    {
+        using TestWorkspace temp = new(); using Factory factory = new(temp);
+        using HttpClient worker = Client(factory, temp.Options.WorkerToken);
+        using HttpClient admin = Client(factory, temp.Options.AdminToken);
+        string path = temp.FilePath("reports/annual");
+        ToolCall call = new(Guid.NewGuid(), "directory.create", JsonSerializer.SerializeToElement(new { path }));
+        ToolRequest request = (await (await worker.PostAsJsonAsync("/api/v1/requests", call)).Content.ReadFromJsonAsync<ToolRequest>())!;
+        Assert.False(Directory.Exists(temp.FilePath("reports")));
+        Assert.Equal(HttpStatusCode.Forbidden, (await worker.PostAsJsonAsync($"/api/v1/requests/{call.RequestId}/decision", new RequestDecision(request.RequestHash, true))).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await admin.PostAsJsonAsync($"/api/v1/requests/{call.RequestId}/decision", new RequestDecision(new string('F', 64), true))).StatusCode);
+        Assert.False(Directory.Exists(path));
+        ToolRequest approved = (await (await admin.PostAsJsonAsync($"/api/v1/requests/{call.RequestId}/decision", new RequestDecision(request.RequestHash, true))).Content.ReadFromJsonAsync<ToolRequest>())!;
+        Assert.Equal(TaskStates.Succeeded, (await AwaitTask(worker, approved.Task!.Id)).Status); Assert.True(Directory.Exists(path));
+    }
+
+    [Fact]
     public async Task Invalid_paths_return_explicit_problem_details()
     {
         using TestWorkspace temp = new();

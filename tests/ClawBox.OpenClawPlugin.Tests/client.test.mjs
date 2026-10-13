@@ -66,9 +66,27 @@ test('HTTP failures do not expose private response bodies', async () => {
   const answer = await new ExecutorClient(config, mock.fetch, 1).execute('file.read', {});
   assert.ok(!JSON.stringify(answer).includes('DO_NOT_RELAY'));
   assert.equal(answer.isError, true);
+  assert.equal(answer.details.status, 'not_submitted');
+  assert.equal(mock.calls.length, 1);
 });
 
-test('configuration is loopback only; five optional schemas match the executor argument contract', () => {
+test('initial validation rejection exposes only a known public code and cannot execute', async () => {
+  const mock = mockTransport([{ status: 422, body: { code: 'invalid_arguments', detail: 'PRIVATE_CONTENT' } }]);
+  const answer = await new ExecutorClient(config, mock.fetch, 1).execute('word.format', {});
+  assert.equal(answer.details.errorCode, 'invalid_arguments');
+  assert.equal(answer.details.status, 'not_submitted');
+  assert.equal(mock.calls.length, 1);
+  assert.ok(!JSON.stringify(answer).includes('PRIVATE_CONTENT'));
+});
+
+test('failure after admission still reports unknown outcome and attempts cancellation', async () => {
+  const mock = mockTransport([{ body: { status: 'pending' } }, { status: 404, body: { code: 'request_not_found' } }, { body: {} }]);
+  const answer = await new ExecutorClient(config, mock.fetch, 1).execute('directory.create', {});
+  assert.equal(answer.details.status, 'outcome_unknown');
+  assert.equal(mock.calls.length, 3);
+});
+
+test('configuration is loopback only; fifteen optional schemas match the executor argument contract', () => {
   const root = mkdtempSync(join(tmpdir(), 'clawbox-plugin-'));
   try {
     const workerTokenFile = join(root, 'worker-token');
@@ -79,10 +97,12 @@ test('configuration is loopback only; five optional schemas match the executor a
     assert.throws(() => loadConfiguration({ workerTokenFile: 'relative' }));
     const registered = [];
     plugin.register({ pluginConfig: { workerTokenFile }, registerTool: (tool, options) => registered.push({ tool, options }) });
-    assert.equal(registered.length, 5);
+    assert.equal(registered.length, 15);
     assert.ok(registered.every(t => t.options.optional && !t.tool.parameters.additionalProperties));
-    assert.deepEqual(registered.map(t => t.tool.name), ['windows_file_read', 'windows_file_write', 'windows_word_read', 'windows_word_create', 'windows_word_replace']);
-    assert.deepEqual(registered[4].tool.parameters.required, ['path', 'outputPath', 'search', 'replacement']);
+    assert.deepEqual(registered.map(t => t.tool.name), ['windows_file_read', 'windows_project_list', 'windows_project_check', 'windows_file_write', 'windows_word_read', 'windows_word_create', 'windows_word_replace', 'windows_directory_create', 'windows_directory_list', 'windows_file_info', 'windows_file_search', 'windows_file_copy', 'windows_file_move', 'windows_file_replace', 'windows_word_format']);
+    assert.deepEqual(registered[6].tool.parameters.required, ['path', 'search', 'replacement']);
+    assert.deepEqual(registered[14].tool.parameters.required, ['path', 'expectedSha256', 'scope']);
+    assert.deepEqual(registered[2].tool.parameters.required, ['path', 'kind', 'expectedSnapshotSha256']);
     writeFileSync(workerTokenFile, 'not-a-key');
     assert.throws(() => loadConfiguration({ workerTokenFile }));
   } finally { rmSync(root, { recursive: true }); }

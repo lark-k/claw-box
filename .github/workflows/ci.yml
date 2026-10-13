@@ -41,6 +41,9 @@ jobs:
       - name: Verify published EXE and private config exclusions
         shell: pwsh
         run: ./scripts/ci/Test-Publish.ps1 -Runtime win-x64
+      - name: Verify desktop portable package and render states
+        shell: pwsh
+        run: ./scripts/ci/Test-DesktopPublish.ps1
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -49,4 +52,5 @@ jobs:
           path: |
             artifacts/test-results/
             artifacts/publish/
+            artifacts/desktop-qa/
           retention-days: 14

@@ -24,11 +24,15 @@ public sealed class TaskWorker(ExecutorStore store, ToolRegistry tools, ILogger<
                     store.Finish(job.Value.Id, TaskStates.Canceled);
                     continue;
                 }
-                var result = tools.Execute(job.Value.Call, stoppingToken);
+                using CancellationTokenSource operation = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+                Task monitor = MonitorCancellation(job.Value.Id, operation);
+                System.Text.Json.JsonElement result;
+                try { result = tools.Execute(job.Value.Call, operation.Token); }
+                finally { operation.Cancel(); await monitor; }
                 // Once committed, report success even if a late cancel arrived: cancel does not undo writes.
                 store.Finish(job.Value.Id, TaskStates.Succeeded, result);
             }
-            catch (OperationCanceledException) { store.Finish(job.Value.Id, TaskStates.Interrupted, error: "executor_stopping"); }
+            catch (OperationCanceledException) { store.Finish(job.Value.Id, stoppingToken.IsCancellationRequested ? TaskStates.Interrupted : TaskStates.Canceled, error: "execution_canceled"); }
             catch (Exception error)
             {
                 string code = error switch
@@ -37,6 +41,7 @@ public sealed class TaskWorker(ExecutorStore store, ToolRegistry tools, ILogger<
                     FileNotFoundException => "file_not_found",
                     DirectoryNotFoundException => "directory_missing",
                     UnauthorizedAccessException => "access_denied",
+                    System.Text.DecoderFallbackException => "unsupported_text_encoding",
                     IOException => "file_io_error",
                     _ => "tool_failed"
                 };
@@ -44,5 +49,17 @@ public sealed class TaskWorker(ExecutorStore store, ToolRegistry tools, ILogger<
                 logger.LogWarning("Task {TaskId} failed with {ErrorCode}", job.Value.Id, code);
             }
         }
+    }
+    private async Task MonitorCancellation(Guid id, CancellationTokenSource operation)
+    {
+        try
+        {
+            while (!operation.IsCancellationRequested)
+            {
+                await Task.Delay(250, operation.Token);
+                if (store.IsCancellationRequested(id)) { operation.Cancel(); return; }
+            }
+        }
+        catch (OperationCanceledException) { }
     }
 }
