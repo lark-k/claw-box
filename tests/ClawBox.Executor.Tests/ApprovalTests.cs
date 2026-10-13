@@ -83,10 +83,10 @@ public sealed class ApprovalTests
         command.Parameters.AddWithValue("$id", approval.ApprovalId.ToString());
         command.ExecuteNonQuery();
         Assert.Throws<ExecutorException>(() => store.Submit(new(approval.ApprovalId, call)));
-        command.CommandText = "PRAGMA user_version=2";
+        command.CommandText = "PRAGMA user_version=3";
         command.ExecuteNonQuery();
         Assert.Throws<InvalidOperationException>(() => new ExecutorStore(temp.Options));
         command.CommandText = "PRAGMA user_version";
-        Assert.Equal(2L, command.ExecuteScalar());
+        Assert.Equal(3L, command.ExecuteScalar());
     }
 }

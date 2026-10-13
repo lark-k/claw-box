@@ -26,6 +26,15 @@ jobs:
           global-json-file: global.json
           cache: true
           cache-dependency-path: '**/packages.lock.json'
+      - name: Set up plugin test runtime
+        # Plugin has no npm dependencies; pin the Node test runtime explicitly.
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version-file: .node-version
+      - name: Set up board installer test runtime
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13.6'
       - name: Restore, build, test and formatting
         shell: pwsh
         run: ./scripts/ci/Verify.ps1

@@ -7,7 +7,7 @@ using Microsoft.Data.Sqlite;
 
 namespace ClawBox.Executor.Persistence;
 
-public sealed class ExecutorStore
+public sealed partial class ExecutorStore
 {
     private readonly string connectionString;
     private readonly ExecutorOptions options;
@@ -27,12 +27,15 @@ public sealed class ExecutorStore
         using (SqliteCommand version = connection.CreateCommand())
         {
             version.CommandText = "PRAGMA user_version";
-            if (Convert.ToInt32(version.ExecuteScalar()) > 1)
+            if (Convert.ToInt32(version.ExecuteScalar()) > 2)
                 throw new InvalidOperationException("Database schema is newer than this executor. Use a compatible release.");
         }
         using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "PRAGMA journal_mode=WAL";
+        command.ExecuteNonQuery();
+        using SqliteTransaction migration = connection.BeginTransaction(deferred: false);
+        command.Transaction = migration;
         command.CommandText = """
-            PRAGMA journal_mode=WAL;
             CREATE TABLE IF NOT EXISTS approvals(id TEXT PRIMARY KEY, hash TEXT NOT NULL, expires TEXT NOT NULL, used INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE IF NOT EXISTS tasks(id TEXT PRIMARY KEY, request_id TEXT NOT NULL UNIQUE, hash TEXT NOT NULL,
                 tool TEXT NOT NULL, call_json TEXT NOT NULL, status TEXT NOT NULL, created TEXT NOT NULL,
@@ -40,9 +43,13 @@ public sealed class ExecutorStore
             CREATE TABLE IF NOT EXISTS audit(sequence INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, event TEXT NOT NULL,
                 task_id TEXT, tool TEXT, request_hash TEXT, error_code TEXT);
             CREATE INDEX IF NOT EXISTS ix_tasks_status ON tasks(status,created);
-            PRAGMA user_version=1;
+            CREATE TABLE IF NOT EXISTS requests(request_id TEXT PRIMARY KEY, hash TEXT NOT NULL,
+                call_json TEXT NOT NULL, status TEXT NOT NULL, created TEXT NOT NULL, expires TEXT NOT NULL, task_id TEXT);
+            CREATE INDEX IF NOT EXISTS ix_requests_status ON requests(status,created);
+            PRAGMA user_version=2;
             """;
         command.ExecuteNonQuery();
+        migration.Commit();
     }
 
     private SqliteConnection Open()
@@ -68,9 +75,16 @@ public sealed class ExecutorStore
 
     public ExecutorTask Submit(SubmitTaskRequest request)
     {
-        string hash = RequestFingerprint.Compute(request.Call);
         using SqliteConnection connection = Open();
         using SqliteTransaction transaction = connection.BeginTransaction(deferred: false);
+        ExecutorTask task = Submit(connection, transaction, request);
+        transaction.Commit();
+        return task;
+    }
+
+    private ExecutorTask Submit(SqliteConnection connection, SqliteTransaction transaction, SubmitTaskRequest request)
+    {
+        string hash = RequestFingerprint.Compute(request.Call);
         using (SqliteCommand existing = Query(connection, transaction, "SELECT * FROM tasks WHERE request_id=$id", ("$id", request.Call.RequestId.ToString())))
         using (SqliteDataReader reader = existing.ExecuteReader())
         {
@@ -97,7 +111,6 @@ public sealed class ExecutorStore
             ("$call", JsonSerializer.Serialize(request.Call, Json)), ("$created", created.ToString("O")));
         Execute(connection, transaction, "UPDATE approvals SET used=1 WHERE id=$id", ("$id", request.ApprovalId.ToString()));
         Audit(connection, transaction, "task_queued", id, request.Call.Tool, hash, null);
-        transaction.Commit();
         return new(id, request.Call.RequestId, request.Call.Tool, TaskStates.Queued, created, null, null, null);
     }
 
@@ -170,6 +183,8 @@ public sealed class ExecutorStore
     {
         using SqliteConnection connection = Open();
         using SqliteTransaction transaction = connection.BeginTransaction(deferred: false);
+        int requests = Execute(connection, transaction, "UPDATE requests SET status='interrupted' WHERE status='pending'");
+        if (requests > 0) Audit(connection, transaction, "requests_interrupted", null, null, null, "executor_restarted");
         int count = Execute(connection, transaction, "UPDATE tasks SET status='interrupted',finished=$at,error_code='executor_restarted' WHERE status IN ('running','queued')", ("$at", DateTimeOffset.UtcNow.ToString("O")));
         if (count > 0) Audit(connection, transaction, "restart_recovery", null, null, null, "executor_restarted");
         transaction.Commit();

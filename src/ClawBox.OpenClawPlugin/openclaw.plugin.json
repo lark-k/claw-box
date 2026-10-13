@@ -1,0 +1,23 @@
+{
+  "id": "clawbox-windows",
+  "name": "ClawBox Windows tools",
+  "description": "Windows files and DOCX through a pinned SSH tunnel and exact local approvals.",
+  "contracts": { "tools": ["windows_file_read", "windows_file_write", "windows_word_read", "windows_word_create", "windows_word_replace"] },
+  "toolMetadata": {
+    "windows_file_read": { "optional": true },
+    "windows_file_write": { "optional": true },
+    "windows_word_read": { "optional": true },
+    "windows_word_create": { "optional": true },
+    "windows_word_replace": { "optional": true }
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "port": { "type": "integer", "minimum": 1024, "maximum": 65535, "default": 18791 },
+      "workerTokenFile": { "type": "string", "minLength": 1 },
+      "timeoutSeconds": { "type": "integer", "minimum": 10, "maximum": 600, "default": 360 }
+    },
+    "required": ["workerTokenFile"]
+  }
+}

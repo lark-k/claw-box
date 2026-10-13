@@ -72,6 +72,29 @@ public sealed class ApiTests
     }
 
     [Fact]
+    public async Task Remote_request_waits_for_admin_and_returns_actual_task_result()
+    {
+        using TestWorkspace temp = new();
+        using Factory factory = new(temp);
+        using HttpClient worker = Client(factory, temp.Options.WorkerToken);
+        using HttpClient admin = Client(factory, temp.Options.AdminToken);
+        ToolCall call = new(Guid.NewGuid(), "file.write", JsonSerializer.SerializeToElement(new { path = temp.FilePath("remote.txt"), content = "盒子请求" }));
+        ToolRequest request = (await (await worker.PostAsJsonAsync("/api/v1/requests", call)).Content.ReadFromJsonAsync<ToolRequest>())!;
+        string route = $"/api/v1/requests/{call.RequestId}";
+        Assert.False(File.Exists(temp.FilePath("remote.txt")));
+        Assert.Equal(HttpStatusCode.Forbidden, (await worker.GetAsync("/api/v1/requests")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await worker.PostAsJsonAsync(route + "/decision", new RequestDecision(request.RequestHash, true))).StatusCode);
+        Assert.Single((await admin.GetFromJsonAsync<PendingToolRequest[]>("/api/v1/requests"))!);
+        ToolRequest approved = (await (await admin.PostAsJsonAsync(route + "/decision", new RequestDecision(request.RequestHash, true))).Content.ReadFromJsonAsync<ToolRequest>())!;
+        Assert.Equal(TaskStates.Succeeded, (await AwaitTask(worker, approved.Task!.Id)).Status);
+        Assert.Equal("盒子请求", File.ReadAllText(temp.FilePath("remote.txt")));
+        Assert.Equal(TaskStates.Succeeded, (await worker.GetFromJsonAsync<ToolRequest>(route))!.Task!.Status);
+        Assert.Equal(HttpStatusCode.Conflict, (await admin.PostAsJsonAsync(route + "/decision", new RequestDecision(request.RequestHash, true))).StatusCode);
+        ToolCall invalid = new(Guid.NewGuid(), "file.read", JsonSerializer.SerializeToElement(new { path = Path.Combine(temp.Root, "outside.txt") }));
+        Assert.Equal(HttpStatusCode.Forbidden, (await worker.PostAsJsonAsync("/api/v1/requests", invalid)).StatusCode);
+    }
+
+    [Fact]
     public async Task Invalid_paths_return_explicit_problem_details()
     {
         using TestWorkspace temp = new();

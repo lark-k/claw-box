@@ -8,12 +8,7 @@ if (-not $Workspace) { $Workspace = Join-Path $env:LOCALAPPDATA 'ClawBox\workspa
 $Workspace = [IO.Path]::GetFullPath($Workspace)
 New-Item -ItemType Directory -Path $state, $Workspace -Force | Out-Null
 # The authenticated Windows user owns this local secret; never write it inside the repository.
-$identity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
-$acl = New-Object Security.AccessControl.DirectorySecurity
-$acl.SetAccessRuleProtection($true, $false)
-$rule = New-Object Security.AccessControl.FileSystemAccessRule($identity, 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow')
-$acl.AddAccessRule($rule)
-Set-Acl -LiteralPath $state -AclObject $acl
+& (Join-Path $PSScriptRoot 'Set-PrivateDirectory.ps1') -Path $state
 $secretFile = Join-Path $state 'tokens.secrets.json'
 if (-not (Test-Path -LiteralPath $secretFile)) {
     @{ adminToken = [Convert]::ToHexString([Security.Cryptography.RandomNumberGenerator]::GetBytes(32));

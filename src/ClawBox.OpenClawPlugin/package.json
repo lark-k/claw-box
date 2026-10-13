@@ -1,0 +1,8 @@
+{
+  "name": "@clawbox/windows-tools",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "openclaw": { "extensions": ["./index.js"] }
+}

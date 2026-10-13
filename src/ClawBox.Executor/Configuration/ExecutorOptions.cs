@@ -13,13 +13,14 @@ public sealed class ExecutorOptions
     public int MaxDocumentBytes { get; set; } = 16 * 1024 * 1024;
     public int MaxExpandedDocumentBytes { get; set; } = 64 * 1024 * 1024;
     public int MaxQueuedTasks { get; set; } = 100;
+    public int MaxPendingRequests { get; set; } = 100;
 
     public void Validate()
     {
         if (Port is < 1024 or > 65535 || WorkerToken.Length < 32 || AdminToken.Length < 32 ||
             WorkerToken == AdminToken || AllowedRoots.Length == 0 || MaxInputBytes is < 1024 or > 16 * 1024 * 1024 ||
             MaxDocumentBytes is < 1024 or > 64 * 1024 * 1024 || MaxExpandedDocumentBytes < MaxDocumentBytes ||
-            MaxQueuedTasks is < 1 or > 1000)
+            MaxQueuedTasks is < 1 or > 1000 || MaxPendingRequests is < 1 or > 1000)
             throw new InvalidOperationException("Executor configuration is invalid; run scripts/dev/Start-Executor.ps1.");
         if (!Path.IsPathFullyQualified(DataDirectory) || AllowedRoots.Any(p => !Path.IsPathFullyQualified(p)))
             throw new InvalidOperationException("Data directory and allowed roots must be absolute paths.");

@@ -31,6 +31,7 @@ builder.Services.AddSingleton<AtomicFiles>();
 builder.Services.AddSingleton<WordDocuments>();
 builder.Services.AddSingleton<ToolRegistry>();
 builder.Services.AddSingleton<ExecutorStore>();
+builder.Services.AddSingleton(provider => InstanceLease.Acquire(provider.GetRequiredService<ExecutorOptions>().DataDirectory));
 builder.Services.AddHostedService<TaskWorker>();
 builder.Services.AddProblemDetails();
 builder.Services.AddAuthentication(TokenAuthentication.SchemeName)
@@ -40,7 +41,8 @@ builder.Services.AddAuthorizationBuilder()
     .AddPolicy("admin", policy => policy.RequireRole("admin"));
 
 WebApplication app = builder.Build();
-using FileStream instanceLease = InstanceLease.Acquire(app.Services.GetRequiredService<ExecutorOptions>().DataDirectory);
+// DI owns the lease so host disposal releases it before a test or service restart reuses state.
+_ = app.Services.GetRequiredService<FileStream>();
 app.Services.GetRequiredService<ExecutorStore>().Recover();
 app.UseExceptionHandler();
 app.Use(async (context, next) =>
@@ -61,9 +63,18 @@ app.Use(async (context, next) =>
 });
 app.UseAuthentication();
 app.UseAuthorization();
-app.MapGet("/healthz", () => Results.Ok(new { status = "ok", service = "claw-box-executor", version = "0.1.0" }));
+app.MapGet("/healthz", () => Results.Ok(new { status = "ok", service = "claw-box-executor", version = typeof(Program).Assembly.GetName().Version?.ToString(3) }));
 RouteGroupBuilder worker = app.MapGroup("/api/v1").RequireAuthorization("worker");
 worker.MapGet("/tools", () => ToolRegistry.Catalog);
+worker.MapPost("/requests", (ToolCall call, ToolRegistry tools, ExecutorStore store) =>
+{
+    tools.Validate(call);
+    ToolRequest request = store.Propose(call);
+    return Results.Accepted($"/api/v1/requests/{call.RequestId}", request);
+});
+app.MapGet("/api/v1/requests/{id:guid}", (Guid id, ExecutorStore store) =>
+    store.GetRequest(id) is ToolRequest request ? Results.Ok(request) : Results.NotFound()).RequireAuthorization();
+worker.MapPost("/requests/{id:guid}/cancel", (Guid id, ExecutorStore store) => Results.Ok(store.CancelRequest(id)));
 worker.MapPost("/tasks", (SubmitTaskRequest request, ToolRegistry tools, ExecutorStore store) =>
 {
     tools.Validate(request.Call);
@@ -76,6 +87,13 @@ worker.MapPost("/tasks/{id:guid}/cancel", (Guid id, ExecutorStore store) => stor
 RouteGroupBuilder admin = app.MapGroup("/api/v1").RequireAuthorization("admin");
 admin.MapPost("/approvals", (ToolCall call, ToolRegistry tools, ExecutorStore store) => { tools.Validate(call); return Results.Ok(store.Approve(call)); });
 admin.MapGet("/audit", (ExecutorStore store) => store.AuditRecords());
+admin.MapGet("/requests", (ExecutorStore store) => store.PendingRequests());
+admin.MapPost("/requests/{id:guid}/decision", (Guid id, RequestDecision decision, ToolRegistry tools, ExecutorStore store) =>
+{
+    ToolRequest request = store.GetRequest(id) ?? throw new ExecutorException("request_not_found", 404, "The tool request does not exist.");
+    tools.Validate(request.Call);
+    return Results.Ok(store.Decide(id, decision));
+});
 app.Run();
 
 public partial class Program;

@@ -2,11 +2,13 @@
 
 RK3568 盒子承担智能体规划与任务管理，远程 Qwen 模型生成工具调用，Windows 执行器在用户授权范围内操作本地文件。
 
-本仓库当前实现**第六阶段：Windows 本地执行器基础版本**。已支持 UTF-8 文件读写、DOCX 读取、新建和正文文字替换，包含请求级审批、持久化任务记录、取消请求与审计日志。盒子与执行器的连接协议将在第七阶段接入；专用桌面应用将在第八阶段开发。
+本仓库实现**第六、七阶段：Windows 执行器与盒子工具连接**。支持 UTF-8 文件读写、DOCX 读取、新建和正文文字替换，包含请求级审批、持久化任务记录、取消与审计。OpenClaw 插件通过 Windows 主动建立的 SSH 加密隧道调用工具，由 Windows 命令行确认具体请求后执行。专用桌面应用将在第八阶段开发。
 
 ## 快速启动
 
 要求：Windows 11、PowerShell 7.4+、.NET SDK（版本见 `global.json`）。DOCX 操作不依赖安装 Microsoft Word。
+
+连接盒子另需 Windows OpenSSH Client；开发验证需 Node.js 22+、Python 3.11+。配对、插件部署和审批操作见[第七阶段运行指南](docs/development/phase-7.md)。
 
 ```powershell
 # 首次安装仓库指定 SDK；SDK 放在用户目录，不放在仓库
@@ -42,8 +44,10 @@ RK3568 盒子承担智能体规划与任务管理，远程 Qwen 模型生成工�
 src/
   ClawBox.Contracts/       对外协议和任务状态
   ClawBox.Executor/        Windows 执行器、工具、授权、持久化、HTTP 接口
+  ClawBox.OpenClawPlugin/  盒子工具插件，无额外 npm 依赖
 tests/
   ClawBox.Executor.Tests/  安全边界、文件与 Word、持久化和 HTTP 测试
+  ClawBox.OpenClawPlugin.Tests/  插件连接、取消与断线测试
 docs/
   architecture/           架构和决策记录
   api/                    接口及工具协议
@@ -63,6 +67,9 @@ artifacts/                构建与测试产物（Git 忽略）
 - [HTTP 与工具协议](docs/api/executor-v1.md)
 - [开发与提交规范](CONTRIBUTING.md)
 - [当前验收范围](docs/development/phase-6.md)
+- [盒子连接与本地审批](docs/development/phase-7.md)
+- [连接协议](docs/api/box-connection-v1.md)
+- [第七阶段验证记录](docs/development/verification-phase-7-2026-10-13.md)
 - [维护与发布](docs/development/operations.md)
 
 首次推送前填写远程仓库地址并启用分支保护；本地初始化不会自动创建远程仓库。

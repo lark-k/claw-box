@@ -58,6 +58,7 @@ try {
     }
     if (-not $ready) { throw 'Published executor did not become ready.' }
     & (Join-Path $repoRoot 'scripts\dev\Invoke-Demo.ps1') -Port $port -Workspace $workspace -TokensFile $tokenPath
+    & (Join-Path $repoRoot 'scripts\ci\Test-Bridge.ps1') -Port $port -Workspace $workspace -TokensFile $tokenPath
     Write-Host 'Published EXE smoke test and private configuration exclusion passed.'
 } finally {
     if ($process) {

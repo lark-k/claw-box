@@ -3,14 +3,13 @@
 ```mermaid
 flowchart LR
     App[Windows APP / 本地用户审批] -->|管理员凭据·具体请求审批| Executor[Windows 执行器]
-    Box[RK3568 OpenClaw] -->|第七阶段连接适配器| Client[Windows 工具调用客户端]
-    Client -->|工作凭据·批准编号| Executor
+    Box[RK3568 OpenClaw 工具插件] -->|SSH 反向隧道·工作凭据·具体请求| Executor
     Executor --> Tools[受限文件与 DOCX 工具]
     Executor --> DB[(SQLite 任务与审计)]
     Box --> LLM[远程 Qwen / vLLM]
 ```
 
-目前交付图中的 Windows 执行器和本地演示客户端。执行器不持有模型 API Key；模型推理保持在远程服务器。
+已实现 Windows 执行器、OpenClaw 工具插件、SSH 配对连接和本地审批控制台。执行器不持有模型 API Key；模型推理保持在远程服务器。
 
 ## 模块
 
@@ -28,7 +27,7 @@ flowchart LR
 
 审批端点只接受 admin token；工具客户端只持有 worker token。审批绑定请求编号、工具名称与规范化后的完整参数，五分钟过期，在入队事务中一次消费。相同请求编号与相同参数的重试返回原任务；更改参数返回冲突，不能借重试再次写文件。
 
-审批是本地用户接口未来需要调用的基础设施；目前演示脚本是显式发起审批的开发客户端。不要把 admin token 提供给模型或盒子。
+盒子使用 worker 提交待审批请求；本地 Review-Requests.ps1 读取并显示完整参数，批准和任务入队在同一事务完成。不要把 admin token 提供给模型或盒子。开发演示脚本的直接审批接口保留，用于确定输入的测试。
 
 ## 数据与恢复
 
@@ -40,4 +39,4 @@ queued 的取消阻止执行；已经开始的短文件操作可能先完成提�
 
 拒绝 UNC、设备路径、NTFS ADS、根目录之外路径以及现存祖先中的 junction/symlink。文件操作前重新检查路径，更新既有文本需提供当前 SHA-256。该策略不隔离同一 Windows 用户控制的其他进程；不能保证对恶意本地进程的文件系统竞态防御。部署时以普通用户运行，工作目录不要同时交给不受信任程序写入。
 
-HTTP 仅监听 IPv4 loopback，Host 限制为 localhost/127.0.0.1，拒绝携带 Origin 的浏览器请求，所有业务接口要求角色凭据。当前没有网络配对、跨设备认证或审批桌面 UI，这些按第七、八阶段实现。
+HTTP 仅监听 IPv4 loopback，Host 限制为 localhost/127.0.0.1，拒绝携带 Origin 的浏览器请求，所有业务接口要求角色凭据。跨设备采用核验主机密钥的 SSH 反向隧道；专用转发密钥只允许指定端口。SQLite v2 新增待审批请求；未决定的请求重启后标记中断。审批桌面 UI 按第八阶段实现。
