@@ -27,7 +27,7 @@ public sealed class ProjectTree(PathPolicy policy)
             foreach (string item in Directory.EnumerateFileSystemEntries(directory.Path))
             {
                 string name = Path.GetFileName(item);
-                if (Ignored.Contains(name) || name.StartsWith(".env", StringComparison.OrdinalIgnoreCase) ||
+                if (Ignored.Contains(name) || name.StartsWith(".qh-dependencies-", StringComparison.OrdinalIgnoreCase) || name.StartsWith(".env", StringComparison.OrdinalIgnoreCase) ||
                     name.Contains("secret", StringComparison.OrdinalIgnoreCase) || name is "known_hosts" or ".npmrc" or "settings.xml") continue;
                 string safe = policy.Resolve(item);
                 if (Directory.Exists(safe)) { pending.Push((safe, directory.Depth + 1)); continue; }

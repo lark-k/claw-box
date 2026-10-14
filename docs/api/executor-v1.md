@@ -42,6 +42,7 @@ ToolCall：
 | file.replace | path、search、replacement、expectedSha256 | 原件路径、replacements、bytes、sha256 |
 | file.list | path（目录） | 文件相对路径、大小、sha256、snapshotSha256 |
 | project.check | path（目录）、kind（build/test）、expectedSnapshotSha256 | stack、exitCode、checksPassed、testsObserved、有界 output、isolation |
+| project.command | path（目录）、operation、expectedSnapshotSha256 | operation、exitCode、commandPassed（安装/Git）或 checksPassed（构建/测试）、有界 output |
 
 路径必须是配置工作目录下的本地绝对路径。写入父目录不存在时先审批 directory.create；它支持最多 20 层缺失父目录。新建、复制与移动不能覆盖既有文件。移动仅限同一卷的单文件，不能移动目录。file.copy/move/info 上限为 MaxDocumentBytes（默认 16 MiB）。directory.list 最多 2,000 个直接子项、不递归、隐藏常见凭据名称，链接仅报告而不跟随。file.search 按项目源码清单的边界扫描 UTF-8 文本，最多 100 个行片段、每段 240 字符，大小写敏感、不使用正则；不扫描 DOCX 二进制正文。
 
@@ -56,5 +57,7 @@ word.format 的 scope 是 document（整个正文/表格）或 paragraph（text 
 `project.check` 的工具任务 succeeded 仅表示检查完成，业务通过必须读取 `checksPassed=true`。退出码为零但没有观察到真实测试通过仍不通过。模型只能选 build/test，不能提供任意命令、程序、环境或打开网络。缺少运行时、脚本、依赖或隔离权限时返回明确失败，不降级宿主执行。运行时配置位于本机私有目录，见 phase-8.md；Gradle 尚未实机验证。
 
 错误：401 无效凭据、403 无授权/路径拒绝、409 请求编号或文件内容冲突、413 数据过大、422 工具或参数不支持、429 队列已满。已入队工具执行失败通过任务状态体现，HTTP 查询仍返回 200。ProblemDetails 包含稳定的 `code`，不返回异常堆栈。
+
+project.command 的固定 operation 为 npm.install、npm.ci、build、test、git.status、git.diff。审批绑定最新源码快照；没有任意命令字符串或追加参数。安装使用本机 Node/npm，在独立 AppContainer 中访问 npm 官方 registry，关闭生命周期脚本，不使用用户 npmrc/凭据。支持普通 registry 依赖，不支持 workspaces、overrides、Git/file/URL/link 依赖。成功安装后发布 node_modules；npm.install 也发布 package-lock.json，npm.ci 保持锁文件。已有依赖保留在返回的 dependencyBackup 目录。Git 仅查看快照中的源码，禁用 hooks、外部 diff/textconv/fsmonitor 和子模块，禁止联网。失败须检查 commandPassed/checksPassed，不以工具任务 succeeded 代替命令成功。
 
 插件在首次提交明确收到 4xx（408 除外）时返回 not_submitted 和受限公开错误码，表示未进入审批/执行；已提交后的查询失败、连接断开或超时仍为 outcome_unknown，不自动重放写操作。

@@ -6,7 +6,7 @@ RK3568 盒子承担智能体规划与任务管理，远程 Qwen 模型生成工�
 
 ## 快速启动
 
-已完成盒子配对的机器，当前可双击 `artifacts/publish/QuantumHarness/0.3.3/win-x64/QuantumHarness.exe`。便携包包含 .NET 运行时，无需 SDK；保持盒子电源、网线和网络共享开启。配置、构建与办公验收见[第八阶段运行指南](docs/development/phase-8.md)。
+已完成盒子配对的机器，当前可双击 `artifacts/publish/QuantumHarness/0.3.9/win-x64/QuantumHarness.exe`。便携包包含 .NET 运行时，无需 SDK；保持盒子电源、网线和网络共享开启。配置、构建与办公验收见[第八阶段运行指南](docs/development/phase-8.md)。0.3.9 新增 npm install/ci、构建/测试和 Git 状态/差异的固定项目命令，修复 Vite 5 隔离构建，并改为连续 30 分钟无有效输出才超时，有进展时不限制整轮累计时长。保留精简进展、工具图标、实时计时、思考光纹、结束后自动折叠，以及项目/最近、文件差异和完全访问模式。
 
 要求：Windows 11、PowerShell 7.4+、.NET SDK（版本见 `global.json`）。DOCX 操作不依赖安装 Microsoft Word。
 

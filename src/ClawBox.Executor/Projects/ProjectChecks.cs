@@ -83,9 +83,31 @@ public sealed class ProjectChecks(PathPolicy policy, ExecutorOptions options)
             string packagePath = Path.Combine(work, "package.json");
             var package = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(packagePath))!;
             string script = package["scripts"]!["build"]!.GetValue<string>();
-            if (script == "vite build")
+            string vitePackage = Path.Combine(source.Root, "node_modules", "vite", "package.json");
+            bool nativeLoader = File.Exists(vitePackage) && int.TryParse(JsonDocument.Parse(File.ReadAllText(vitePackage)).RootElement.GetProperty("version").GetString()!.Split('.')[0], out int major) && major >= 6;
+            if (script == "vite build" && nativeLoader)
             {
                 package["scripts"]!["build"] = "vite build --configLoader native";
+                File.WriteAllText(packagePath, package.ToJsonString());
+            }
+            else if (script == "vite build" && File.Exists(vitePackage))
+            {
+                // Vite 5 bundles its config with esbuild plugins, which cannot use our
+                // synchronous IPC adapter. Load JS config inside the same sandbox and
+                // call Vite's build API; user sources and configuration remain untouched.
+                if (File.Exists(Path.Combine(work, "vite.config.ts")) || File.Exists(Path.Combine(work, "vite.config.mts")))
+                    throw new ExecutorException("project_config_unsupported", 422, "Vite 5 isolated builds currently require a JS/MJS config.");
+                File.WriteAllText(Path.Combine(work, ".qh-vite-build.mjs"), """
+                    import {build} from 'vite';
+                    import {existsSync} from 'node:fs';
+                    import {resolve} from 'node:path';
+                    import {pathToFileURL} from 'node:url';
+                    const file=['vite.config.js','vite.config.mjs','vite.config.cjs'].find(existsSync);
+                    const exported=file?(await import(pathToFileURL(resolve(file)).href)).default:{};
+                    const config=await(typeof exported==='function'?exported({command:'build',mode:'production',isSsrBuild:false,isPreview:false}):exported);
+                    await build({...config,configFile:false});
+                    """);
+                package["scripts"]!["build"] = "node .qh-vite-build.mjs";
                 File.WriteAllText(packagePath, package.ToJsonString());
             }
         }
@@ -237,7 +259,7 @@ public sealed class ProjectChecks(PathPolicy policy, ExecutorOptions options)
         if (!File.Exists(file)) throw Missing();
         return file;
     }
-    private static void CopyCache(string source, string target, CancellationToken cancellation)
+    internal static void CopyCache(string source, string target, CancellationToken cancellation)
     {
         long bytes = 0; int count = 0;
         Stack<(string Source, string Target)> pending = new(); pending.Push((source, target));
@@ -256,6 +278,8 @@ public sealed class ProjectChecks(PathPolicy policy, ExecutorOptions options)
                 bytes += new FileInfo(entry).Length;
                 if (++count > 50000 || bytes > 1024L * 1024 * 1024) throw new ExecutorException("dependency_cache_too_large", 413, "Offline dependency cache exceeds the snapshot limit.");
                 File.Copy(entry, output, false);
+                // These are disposable copies. Public runtimes may contain readonly files.
+                File.SetAttributes(output, FileAttributes.Normal);
             }
         }
     }

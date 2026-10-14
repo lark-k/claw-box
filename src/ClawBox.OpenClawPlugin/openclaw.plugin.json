@@ -2,8 +2,9 @@
   "id": "clawbox-windows",
   "name": "ClawBox Windows tools",
   "description": "Windows office and code project tools through a pinned SSH tunnel and exact local approvals.",
-  "contracts": { "tools": ["windows_file_read", "windows_file_write", "windows_word_read", "windows_word_create", "windows_word_replace", "windows_project_list", "windows_project_check", "windows_directory_create", "windows_directory_list", "windows_file_info", "windows_file_search", "windows_file_copy", "windows_file_move", "windows_file_replace", "windows_word_format"] },
+  "contracts": { "tools": ["windows_project_command", "windows_file_read", "windows_file_write", "windows_word_read", "windows_word_create", "windows_word_replace", "windows_project_list", "windows_project_check", "windows_directory_create", "windows_directory_list", "windows_file_info", "windows_file_search", "windows_file_copy", "windows_file_move", "windows_file_replace", "windows_word_format"] },
   "toolMetadata": {
+    "windows_project_command": { "optional": true },
     "windows_file_read": { "optional": true },
     "windows_file_write": { "optional": true },
     "windows_word_read": { "optional": true },
@@ -26,7 +27,7 @@
     "properties": {
       "port": { "type": "integer", "minimum": 1024, "maximum": 65535, "default": 18791 },
       "workerTokenFile": { "type": "string", "minLength": 1 },
-      "timeoutSeconds": { "type": "integer", "minimum": 10, "maximum": 600, "default": 360 }
+      "timeoutSeconds": { "type": "integer", "minimum": 10, "maximum": 600, "default": 600 }
     },
     "required": ["workerTokenFile"]
   }

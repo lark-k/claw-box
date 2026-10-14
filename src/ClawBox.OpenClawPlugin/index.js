@@ -1,6 +1,7 @@
 import { ExecutorClient, loadConfiguration } from './client.js';
 
 const definitions = [
+  ['windows_project_command', 'project.command', 'Run a fixed project operation: npm.install or npm.ci installs registry dependencies with installation scripts disabled; build/test runs isolated checks; git.status/git.diff returns read-only source status/diffs. First get project snapshotSha256 and pass expectedSnapshotSha256. Inspect commandPassed/checksPassed, exitCode and output. No arbitrary shell, dev server or custom arguments.', ['path', 'operation', 'expectedSnapshotSha256'], []],
   ['windows_file_read', 'file.read', 'Read a UTF-8 file on the paired Windows PC.', ['path'], []],
   ['windows_project_list', 'file.list', 'Discover files in a selected Windows code project and obtain snapshotSha256. Start here for code development; no command knowledge needed.', ['path'], []],
   ['windows_project_check', 'project.check', 'Build or test a Windows project snapshot in native Windows isolation. The executor detects Node/Vue/React, Maven/Java, Gradle or .NET. kind must be build or test. Pass the latest snapshotSha256 as expectedSnapshotSha256; refresh it after code changes. Check checksPassed and logs, not just request success.', ['path', 'kind', 'expectedSnapshotSha256'], []],
@@ -19,6 +20,7 @@ const definitions = [
 ];
 
 function propertySchema(field) {
+  if (field === 'operation') return {type:'string', enum:['npm.install','npm.ci','build','test','git.status','git.diff']};
   const enums = {scope: ['document', 'paragraph'], bold: ['true', 'false'], alignment: ['left', 'center', 'right', 'justify'], style: ['Normal', 'Title', 'Heading1', 'Heading2', 'Heading3'], kind: ['build', 'test']};
   if (enums[field]) return {type: 'string', enum: enums[field]};
   if (field === 'expectedSha256') return {type: 'string', pattern: '^[A-Fa-f0-9]{64}$'};

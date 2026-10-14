@@ -11,7 +11,7 @@ import time
 
 PLUGIN_ID = "clawbox-windows"
 TOOLS = ["windows_file_read", "windows_file_write", "windows_word_read",
-         "windows_word_create", "windows_word_replace", "windows_project_list", "windows_project_check",
+         "windows_word_create", "windows_word_replace", "windows_project_list", "windows_project_check", "windows_project_command",
          "windows_directory_create", "windows_directory_list", "windows_file_info", "windows_file_search",
          "windows_file_copy", "windows_file_move", "windows_file_replace", "windows_word_format"]
 FILES = ("package.json", "openclaw.plugin.json", "index.js", "client.js")
@@ -68,7 +68,7 @@ def main():
     if PLUGIN_ID not in plugins["allow"]:
         plugins["allow"].append(PLUGIN_ID)
     entries[PLUGIN_ID] = {"enabled": True, "config": {
-        "port": args.port, "workerTokenFile": str(worker_file), "timeoutSeconds": 360,
+        "port": args.port, "workerTokenFile": str(worker_file), "timeoutSeconds": 600,
     }}
     paths = plugins.setdefault("load", {}).setdefault("paths", [])
     paths[:] = [p for p in paths if not p.startswith(str(deploy_root) + "/")]

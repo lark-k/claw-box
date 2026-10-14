@@ -15,6 +15,8 @@ const guidance = {
   paragraph_not_found: 'No exact matching paragraph; document unchanged. Read the current paragraph text first.',
   unsupported_text_encoding: 'The file is not supported UTF-8 text. Use Word tools for DOCX; do not overwrite binary files with text.',
   project_runtime_missing: 'The matching local SDK/runtime is not configured. Ask the human to configure it; never bypass isolation with shell execution.',
+  project_lock_missing: 'npm ci needs package-lock.json. Obtain a fresh snapshot and request npm.install first.',
+  dependency_source_unsupported: 'This installer accepts npm registry dependencies only, without workspaces, overrides, Git/file/URL dependencies or links. Do not bypass it with shell execution.',
 };
 
 export function loadConfiguration(config) {

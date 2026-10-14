@@ -13,6 +13,7 @@ public partial class MainWindow : Window
     public ShellViewModel Model { get; }
     private readonly bool preview;
     private bool paneOpen;
+    private bool syncingSelection;
     public MainWindow(ShellViewModel model, bool preview = false)
     {
         this.preview = preview;
@@ -25,10 +26,11 @@ public partial class MainWindow : Window
         }
         DataContext = model;
         model.Messages.CollectionChanged += (_, _) => { Welcome.Visibility = model.Messages.Count == 0 ? Visibility.Visible : Visibility.Collapsed; ChatScroll.ScrollToEnd(); };
-        model.Approvals.CollectionChanged += (_, _) => { if (model.Approvals.Count > 0) ShowPane(true); };
+        model.Approvals.CollectionChanged += (_, _) => { if (model.Approvals.Count > 0) Dispatcher.BeginInvoke(() => ComposerSurface.BringIntoView()); };
         model.PropertyChanged += (_, args) =>
         {
             if (args.PropertyName == nameof(model.Busy)) StopButton.Visibility = model.Busy ? Visibility.Visible : Visibility.Collapsed;
+            if (args.PropertyName == nameof(model.Selected)) SyncSelection();
         };
         Welcome.Visibility = model.Messages.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
     }
@@ -36,13 +38,72 @@ public partial class MainWindow : Window
     private void Window_Closing(object? sender, CancelEventArgs e) => Model.Dispose();
     private void Window_SizeChanged(object sender, SizeChangedEventArgs e)
     {
-        if (SidebarColumn is not null) SidebarColumn.Width = new GridLength(ActualWidth >= 1700 ? 432 : 320);
-        if (paneOpen && TaskColumn is not null) TaskColumn.Width = new GridLength(ActualWidth >= 1400 ? 360 : 310);
+        if (SidebarColumn is not null) SidebarColumn.Width = new GridLength(ActualWidth >= 1700 ? 290 : 250);
+        if (paneOpen && TaskColumn is not null) TaskColumn.Width = new GridLength(ActualWidth >= 1400 ? 380 : 310);
     }
-    private void ShowPane(bool visible) { paneOpen = visible; TaskColumn.Width = new GridLength(visible ? (ActualWidth >= 1400 ? 360 : 310) : 0); }
+    private void ShowPane(bool visible) { paneOpen = visible; TaskColumn.Width = new GridLength(visible ? (ActualWidth >= 1400 ? 380 : 310) : 0); }
     private void ToggleTasks_Click(object sender, RoutedEventArgs e) => ShowPane(!paneOpen);
     private void Home_Click(object sender, RoutedEventArgs e) => ShowPane(false);
     private void New_Click(object sender, RoutedEventArgs e) => Model.NewConversation();
+    private void RecentNew_Click(object sender, RoutedEventArgs e) => Model.NewRecent();
+    private void ProjectNew_Click(object sender, RoutedEventArgs e)
+    {
+        if (((Button)sender).Tag is not string path) return;
+        Models.Conversation? conversation = Model.Conversations.Where(c => c.WorkspacePath.Equals(path, StringComparison.OrdinalIgnoreCase)).OrderByDescending(c => c.UpdatedAt).FirstOrDefault();
+        if (conversation is null) Model.AddProject(path); else Model.Selected = conversation;
+    }
+    private void Access_Click(object sender, RoutedEventArgs e)
+    {
+        Button button = (Button)sender;
+        button.ContextMenu.PlacementTarget = button;
+        button.ContextMenu.Placement = System.Windows.Controls.Primitives.PlacementMode.Top;
+        button.ContextMenu.IsOpen = true;
+    }
+    private void AccessMode_Click(object sender, RoutedEventArgs e) { if (((MenuItem)sender).Tag is string mode) Model.SetAccess(mode); }
+    private void DeleteConversation_Click(object sender, RoutedEventArgs e)
+    {
+        if (((MenuItem)sender).Parent is ContextMenu menu && menu.PlacementTarget is ListBoxItem row && row.DataContext is Models.Conversation conversation)
+        {
+            if (MessageBox.Show(this, "删除该会话和本地对话记录？工作区、附件和用户文件会保留。", "删除会话", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+            try { Model.DeleteConversation(conversation); }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException) { MessageBox.Show(this, error.Message, "会话未删除"); }
+        }
+    }
+    private void Conversation_RightClick(object sender, MouseButtonEventArgs e)
+    {
+        ListBoxItem row = (ListBoxItem)sender;
+        MenuItem delete = new() { Header = "删除会话" };
+        delete.Click += DeleteConversation_Click;
+        ContextMenu menu = new() { PlacementTarget = row };
+        menu.Items.Add(delete); row.ContextMenu = menu; menu.IsOpen = true; e.Handled = true;
+    }
+    private void RemoveProject_Click(object sender, RoutedEventArgs e)
+    {
+        if (((MenuItem)sender).Parent is ContextMenu menu && menu.PlacementTarget is Button button && button.Tag is string path) Model.RemoveProject(path);
+    }
+    private void Conversation_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (syncingSelection) return;
+        if (((ListBox)sender).SelectedItem is Models.Conversation conversation) Model.Selected = conversation;
+        SyncSelection();
+    }
+    private void ConversationList_Loaded(object sender, RoutedEventArgs e) => SyncSelection();
+    private void SyncSelection()
+    {
+        if (syncingSelection) return;
+        syncingSelection = true;
+        try { foreach (ListBox list in Descendants<ListBox>(this)) list.SelectedItem = list.Items.Contains(Model.Selected) ? Model.Selected : null; }
+        finally { syncingSelection = false; }
+    }
+    private static IEnumerable<T> Descendants<T>(DependencyObject parent) where T : DependencyObject
+    {
+        for (int i = 0; i < System.Windows.Media.VisualTreeHelper.GetChildrenCount(parent); i++)
+        {
+            DependencyObject child = System.Windows.Media.VisualTreeHelper.GetChild(parent, i);
+            if (child is T item) yield return item;
+            foreach (T descendant in Descendants<T>(child)) yield return descendant;
+        }
+    }
     private async void Connect_Click(object sender, RoutedEventArgs e) => await Model.Connect();
     private async void Send_Click(object sender, RoutedEventArgs e) => await Model.Send();
     private async void Stop_Click(object sender, RoutedEventArgs e) => await Model.Stop();
@@ -116,18 +177,23 @@ public partial class MainWindow : Window
         OpenFolderDialog dialog = new() { Title = "选择代码项目目录" };
         if (dialog.ShowDialog(this) != true) return;
         if (Path.TrimEndingDirectorySeparator(dialog.FolderName) == Path.GetPathRoot(dialog.FolderName)) { Model.Status = "请选择具体项目，不要选择整个磁盘。"; return; }
-        Model.Settings.Workspace = dialog.FolderName;
-        Model.SaveSettings(); Model.NewConversation(); Model.Attachments.Add(dialog.FolderName);
-        await Model.Connect();
+        Model.AddProject(dialog.FolderName);
+        if (!Model.Connected && !Model.Busy) await Model.Connect();
     }
     private void Help_Click(object sender, RoutedEventArgs e) => MessageBox.Show(this,
         "1. 保持盒子电源、网线与网络共享开启。\n2. 点击连接盒子。\n3. 选择文件并输入任务，Ctrl+Enter 发送。\n4. 查看审批卡片的完整参数，再批准或拒绝。\n5. 核对执行记录与结果文件。\n\n选择工作区外的文件时会复制到工作区，原文件保持不变。",
         "Quantum Harness 使用帮助", MessageBoxButton.OK, MessageBoxImage.Information);
     private void Settings_Click(object sender, RoutedEventArgs e)
     {
-        if (Model.Busy) { Model.Status = "请先结束当前任务，再修改连接设置。"; return; }
+        if (!Model.CanManageChats) { Model.Status = "请先结束当前任务，再修改连接设置。"; return; }
         SettingsWindow dialog = new(Model.Settings) { Owner = this };
-        if (dialog.ShowDialog() == true) { Model.SaveSettings(); Model.Status = "设置已保存，点击连接盒子应用。"; }
+        if (dialog.ShowDialog() == true)
+        {
+            string workspace = Model.Settings.Workspace;
+            Model.SaveSettings();
+            if (!workspace.Equals(Model.Selected.WorkspacePath, StringComparison.OrdinalIgnoreCase)) Model.AddProject(workspace);
+            Model.Status = "设置已保存，点击连接盒子应用。";
+        }
     }
     public void PreviewPane() => ShowPane(true);
 }

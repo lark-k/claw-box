@@ -86,7 +86,7 @@ test('failure after admission still reports unknown outcome and attempts cancell
   assert.equal(mock.calls.length, 3);
 });
 
-test('configuration is loopback only; fifteen optional schemas match the executor argument contract', () => {
+test('configuration is loopback only; sixteen optional schemas match the executor argument contract', () => {
   const root = mkdtempSync(join(tmpdir(), 'clawbox-plugin-'));
   try {
     const workerTokenFile = join(root, 'worker-token');
@@ -97,12 +97,14 @@ test('configuration is loopback only; fifteen optional schemas match the executo
     assert.throws(() => loadConfiguration({ workerTokenFile: 'relative' }));
     const registered = [];
     plugin.register({ pluginConfig: { workerTokenFile }, registerTool: (tool, options) => registered.push({ tool, options }) });
-    assert.equal(registered.length, 15);
+    assert.equal(registered.length, 16);
     assert.ok(registered.every(t => t.options.optional && !t.tool.parameters.additionalProperties));
-    assert.deepEqual(registered.map(t => t.tool.name), ['windows_file_read', 'windows_project_list', 'windows_project_check', 'windows_file_write', 'windows_word_read', 'windows_word_create', 'windows_word_replace', 'windows_directory_create', 'windows_directory_list', 'windows_file_info', 'windows_file_search', 'windows_file_copy', 'windows_file_move', 'windows_file_replace', 'windows_word_format']);
-    assert.deepEqual(registered[6].tool.parameters.required, ['path', 'search', 'replacement']);
-    assert.deepEqual(registered[14].tool.parameters.required, ['path', 'expectedSha256', 'scope']);
-    assert.deepEqual(registered[2].tool.parameters.required, ['path', 'kind', 'expectedSnapshotSha256']);
+    assert.deepEqual(registered.map(t => t.tool.name), ['windows_project_command', 'windows_file_read', 'windows_project_list', 'windows_project_check', 'windows_file_write', 'windows_word_read', 'windows_word_create', 'windows_word_replace', 'windows_directory_create', 'windows_directory_list', 'windows_file_info', 'windows_file_search', 'windows_file_copy', 'windows_file_move', 'windows_file_replace', 'windows_word_format']);
+    const schema = name => registered.find(t => t.tool.name === name).tool.parameters;
+    assert.deepEqual(schema('windows_word_replace').required, ['path', 'search', 'replacement']);
+    assert.deepEqual(schema('windows_word_format').required, ['path', 'expectedSha256', 'scope']);
+    assert.deepEqual(schema('windows_project_check').required, ['path', 'kind', 'expectedSnapshotSha256']);
+    assert.deepEqual(schema('windows_project_command').required, ['path', 'operation', 'expectedSnapshotSha256']);
     writeFileSync(workerTokenFile, 'not-a-key');
     assert.throws(() => loadConfiguration({ workerTokenFile }));
   } finally { rmSync(root, { recursive: true }); }

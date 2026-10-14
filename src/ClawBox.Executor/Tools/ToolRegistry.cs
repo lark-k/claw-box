@@ -13,6 +13,7 @@ public sealed class ToolRegistry(PathPolicy policy, AtomicFiles files, WordDocum
 {
     private static readonly UTF8Encoding Utf8 = new(false, true);
     public static IReadOnlyList<ToolDescription> Catalog { get; } = [
+        Describe("project.command", "Run fixed npm.install, npm.ci, build or test operations, bound to an approved project snapshot. Installation disables scripts.", true, new { path = "string", operation = "string", expectedSnapshotSha256 = "string" }, ["path", "operation", "expectedSnapshotSha256"]),
         Describe("file.read", "Read UTF-8 text and SHA-256.", false, new { path = "string" }, ["path"]),
         Describe("file.list", "List project source files and an immutable snapshot SHA-256.", false, new { path = "string" }, ["path"]),
         Describe("directory.create", "Create a directory and missing parents within the approved workspace. Existing directories are unchanged.", true, new { path = "string" }, ["path"]),
@@ -64,6 +65,8 @@ public sealed class ToolRegistry(PathPolicy policy, AtomicFiles files, WordDocum
         if (call.Tool == "word.replace" && SameWordDestination(call) && !call.Arguments.TryGetProperty("expectedSha256", out _)) throw InvalidArguments();
         if (call.Tool == "project.check" && (Get(call, "kind") is not ("build" or "test") ||
             !System.Text.RegularExpressions.Regex.IsMatch(Get(call, "expectedSnapshotSha256"), "^[A-F0-9]{64}$"))) throw InvalidArguments();
+        if (call.Tool == "project.command" && (!ProjectCommands.Supported(Get(call, "operation")) ||
+            !System.Text.RegularExpressions.Regex.IsMatch(Get(call, "expectedSnapshotSha256"), "^[A-F0-9]{64}$"))) throw InvalidArguments();
     }
 
     public JsonElement Execute(ToolCall call, CancellationToken cancellation)
@@ -83,6 +86,7 @@ public sealed class ToolRegistry(PathPolicy policy, AtomicFiles files, WordDocum
             case "file.move": return workspace.CopyOrMove(path, Get(call, "outputPath"), Get(call, "expectedSha256"), call.Tool == "file.move", cancellation);
             case "file.replace": return workspace.Replace(path, Get(call, "search"), Get(call, "replacement"), Get(call, "expectedSha256"), cancellation);
             case "project.check": return new ProjectChecks(policy, options).Execute(path, Get(call, "kind"), Get(call, "expectedSnapshotSha256"), cancellation);
+            case "project.command": return new ProjectCommands(policy, files, options).Execute(path, Get(call, "operation"), Get(call, "expectedSnapshotSha256"), cancellation);
             case "file.read":
                 byte[] text = Read(path, options.MaxInputBytes);
                 return JsonSerializer.SerializeToElement(new { path, content = Utf8.GetString(text), sha256 = AtomicFiles.Hash(text) });
@@ -128,7 +132,7 @@ public sealed class ToolRegistry(PathPolicy policy, AtomicFiles files, WordDocum
     }
 
     private static string Get(ToolCall call, string name) => call.Arguments.GetProperty(name).GetString()!;
-    private static bool IsDirectoryTool(string tool) => tool is "file.list" or "project.check" or "file.search" or "directory.create" or "directory.list";
+    private static bool IsDirectoryTool(string tool) => tool is "file.list" or "project.check" or "project.command" or "file.search" or "directory.create" or "directory.list";
     private string WordDestination(ToolCall call) => policy.Resolve(WordFormatting.Get(call.Arguments, "outputPath") ?? Get(call, "path"));
     private bool SameWordDestination(ToolCall call) => string.Equals(WordDestination(call), policy.Resolve(Get(call, "path")), OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
     private static ExecutorException InvalidArguments() => new("invalid_arguments", 422, "Tool arguments do not match the tool schema.");
@@ -145,6 +149,7 @@ public sealed class ToolRegistry(PathPolicy policy, AtomicFiles files, WordDocum
         "alignment" => new { type = "string", @enum = new[] { "left", "center", "right", "justify" } },
         "style" => new { type = "string", @enum = new[] { "Normal", "Title", "Heading1", "Heading2", "Heading3" } },
         "kind" => new { type = "string", @enum = new[] { "build", "test" } },
+        "operation" => new { type = "string", @enum = new[] { "npm.install", "npm.ci", "build", "test", "git.status", "git.diff" } },
         "expectedSha256" => new { type = "string", pattern = "^[A-Fa-f0-9]{64}$" },
         "expectedSnapshotSha256" => new { type = "string", pattern = "^[A-F0-9]{64}$" },
         _ => new { type = "string" }

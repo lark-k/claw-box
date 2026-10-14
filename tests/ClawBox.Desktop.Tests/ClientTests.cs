@@ -27,8 +27,11 @@ public sealed class ClientTests
             Assert.Equal(WorkspaceContext.Key(conversation, @"C:\workspace"), request.Headers.GetValues("x-openclaw-session-key").Single());
             using JsonDocument body = JsonDocument.Parse(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
             Assert.Equal("openclaw:quantum-harness", body.RootElement.GetProperty("model").GetString());
+            Assert.Equal(8192, body.RootElement.GetProperty("max_tokens").GetInt32());
             Assert.Equal("system", body.RootElement.GetProperty("messages")[0].GetProperty("role").GetString());
             Assert.Contains("tool_search", body.RootElement.GetProperty("messages")[0].GetProperty("content").GetString());
+            Assert.Contains(TurnTranscript.ProgressMarker, body.RootElement.GetProperty("messages")[0].GetProperty("content").GetString());
+            Assert.Contains(TurnTranscript.FinalMarker, body.RootElement.GetProperty("messages")[0].GetProperty("content").GetString());
             Assert.Equal("user", body.RootElement.GetProperty("messages")[2].GetProperty("role").GetString());
             Assert.False(body.RootElement.TryGetProperty("tools", out _));
             return new(HttpStatusCode.OK)

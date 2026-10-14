@@ -11,7 +11,7 @@ using Microsoft.Win32.SafeHandles;
 
 namespace ClawBox.Executor.Projects;
 
-/// <summary>Windows isolation boundary. No network capabilities or inherited user environment.</summary>
+/// <summary>Windows isolation boundary. No inherited user environment; network is off unless the fixed installer requests internetClient.</summary>
 [SupportedOSPlatform("windows")]
 public sealed class NativeSandbox : IDisposable
 {
@@ -64,7 +64,7 @@ public sealed class NativeSandbox : IDisposable
     private static string WorkBase() => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
         "QuantumHarnessChecks-" + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(WindowsIdentity.GetCurrent().User!.Value)))[..16]);
     public SandboxResult Run(string executable, IReadOnlyList<string> arguments, IDictionary<string, string>? extraEnvironment,
-        CancellationToken cancellation, int seconds = 120)
+        CancellationToken cancellation, int seconds = 120, bool internet = false)
     {
         SecurityAttributes inheritable = new() { Length = Marshal.SizeOf<SecurityAttributes>(), InheritHandle = true };
         Check(CreatePipe(out IntPtr read, out IntPtr write, ref inheritable, 0));
@@ -76,13 +76,19 @@ public sealed class NativeSandbox : IDisposable
         nuint size = 0;
         _ = InitializeProcThreadAttributeList(IntPtr.Zero, 2, 0, ref size);
         IntPtr attributes = Marshal.AllocHGlobal((int)size), caps = Marshal.AllocHGlobal(Marshal.SizeOf<Capabilities>()), handles = Marshal.AllocHGlobal(IntPtr.Size * 2);
-        IntPtr environment = IntPtr.Zero, job = IntPtr.Zero;
+        IntPtr environment = IntPtr.Zero, job = IntPtr.Zero, internetSid = IntPtr.Zero, capability = IntPtr.Zero;
         ProcessInformation process = default;
         bool initialized = false;
         try
         {
             Check(InitializeProcThreadAttributeList(attributes, 2, 0, ref size)); initialized = true;
-            Marshal.StructureToPtr(new Capabilities { Sid = sid }, caps, false);
+            if (internet)
+            {
+                Check(ConvertStringSidToSid("S-1-15-3-1", out internetSid));
+                capability = Marshal.AllocHGlobal(Marshal.SizeOf<SidAttribute>());
+                Marshal.StructureToPtr(new SidAttribute { Sid = internetSid, Attributes = 4 }, capability, false);
+            }
+            Marshal.StructureToPtr(new Capabilities { Sid = sid, Sids = capability, Count = internet ? 1u : 0u }, caps, false);
             Marshal.WriteIntPtr(handles, input.DangerousGetHandle()); Marshal.WriteIntPtr(handles, IntPtr.Size, write);
             Check(UpdateProcThreadAttribute(attributes, 0, 0x20009, caps, (nuint)Marshal.SizeOf<Capabilities>(), IntPtr.Zero, IntPtr.Zero));
             Check(UpdateProcThreadAttribute(attributes, 0, 0x20002, handles, (nuint)(IntPtr.Size * 2), IntPtr.Zero, IntPtr.Zero));
@@ -158,6 +164,8 @@ public sealed class NativeSandbox : IDisposable
             if (initialized) DeleteProcThreadAttributeList(attributes);
             Marshal.FreeHGlobal(attributes); Marshal.FreeHGlobal(caps); Marshal.FreeHGlobal(handles);
             if (environment != IntPtr.Zero) Marshal.FreeHGlobal(environment);
+            if (capability != IntPtr.Zero) Marshal.FreeHGlobal(capability);
+            if (internetSid != IntPtr.Zero) FreeSid(internetSid);
         }
     }
     private static (string, bool) ReadOutput(Stream stream)
@@ -200,6 +208,9 @@ public sealed class NativeSandbox : IDisposable
     }
     private static void Check(bool success) { if (!success) throw new Win32Exception(Marshal.GetLastWin32Error()); }
     [StructLayout(LayoutKind.Sequential)] private struct Capabilities { public IntPtr Sid, Sids; public uint Count, Reserved; }
+    [StructLayout(LayoutKind.Sequential)] private struct SidAttribute { public IntPtr Sid; public uint Attributes; }
+    [DllImport("advapi32.dll", EntryPoint = "ConvertStringSidToSidW", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)] private static extern bool ConvertStringSidToSid(string value, out IntPtr result);
     [StructLayout(LayoutKind.Sequential)] private struct SecurityAttributes { public int Length; public IntPtr Descriptor; [MarshalAs(UnmanagedType.Bool)] public bool InheritHandle; }
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     private struct StartupInfo

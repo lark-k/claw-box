@@ -9,6 +9,9 @@
 **/.vite/
 **/.cache/
 **/.pytest_cache/
+# Browser test recordings and generated project dependency staging/backups.
+**/.playwright-cli/
+**/.qh-dependencies-*/
 *.tsbuildinfo
 npm-debug.log*
 yarn-debug.log*

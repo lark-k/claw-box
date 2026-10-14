@@ -8,7 +8,7 @@ import subprocess
 import tempfile
 
 WINDOWS_TOOLS = ["windows_file_read", "windows_file_write", "windows_word_read",
-                 "windows_word_create", "windows_word_replace", "windows_project_list", "windows_project_check",
+                 "windows_word_create", "windows_word_replace", "windows_project_list", "windows_project_check", "windows_project_command",
                  "windows_directory_create", "windows_directory_list", "windows_file_info", "windows_file_search",
                  "windows_file_copy", "windows_file_move", "windows_file_replace", "windows_word_format"]
 NATIVE_TOOLS = ["read", "write", "edit", "apply_patch", "exec", "process", "browser", "web_fetch", "web_search",
@@ -24,6 +24,8 @@ def configure_agent(config, home):
     if not entries:
         entries["main"] = {}  # Preserve the implicit main agent as the default.
     agents["ownership"] = "explicit"
+    defaults = agents.setdefault("defaults", {})
+    defaults["timeoutSeconds"] = 0  # APP owns the inactivity deadline; no whole-turn cutoff.
     workspace = str(home / ".openclaw" / "workspace-quantum-harness")
     old = entries.get("quantum-harness", {})
     if old.get("workspace", workspace) != workspace:
