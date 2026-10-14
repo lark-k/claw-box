@@ -19,6 +19,7 @@ public sealed class ShellViewModel : Observable, IDisposable
     private readonly HashSet<Guid> completed = [];
     private readonly AutomaticApprovals automatic = new();
     private readonly Dictionary<string, FileChanges.Snapshot> originals = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, ProjectGroup> projectGroups = new(StringComparer.OrdinalIgnoreCase);
     private readonly RuntimeSession runtime = new();
     private readonly DispatcherTimer timer;
     private CancellationTokenSource? turn;
@@ -36,15 +37,21 @@ public sealed class ShellViewModel : Observable, IDisposable
     public bool HasApprovals => Approvals.Count > 0;
     public IEnumerable<ApprovalCard> VisibleApprovals => Approvals.Take(1);
     public string ChangeTotals => $"本轮 · {Changes.Count} 个文件";
-    public IEnumerable<ProjectGroup> Projects => Settings.Projects.Select(path => new ProjectGroup(path,
-        FilteredConversations.Where(c => c.IsProject && c.WorkspacePath.Equals(path, StringComparison.OrdinalIgnoreCase)).ToArray()));
+    public IEnumerable<ProjectGroup> Projects => Settings.Projects.Select(path =>
+    {
+        Conversation[] chats = FilteredConversations.Where(c => c.IsProject && c.WorkspacePath.Equals(path, StringComparison.OrdinalIgnoreCase)).ToArray();
+        if (!projectGroups.TryGetValue(path, out ProjectGroup? group)) projectGroups[path] = group = new(path, chats);
+        else if (!group.Conversations.SequenceEqual(chats)) group.Conversations = chats;
+        return group;
+    }).ToArray();
     public IEnumerable<Conversation> Recent => FilteredConversations.Where(c => !c.IsProject || !Settings.Projects.Contains(c.WorkspacePath, StringComparer.OrdinalIgnoreCase)).ToArray();
-    public string AccessLabel => Settings.AccessMode switch { "readOnly" => "只读", "fullAccess" => "完全访问", _ => "逐请求审批" };
+    public string AccessLabel => Settings.AccessMode switch { "readOnly" => "只读", "fullAccess" => "完全访问", _ => "请求批准" };
     public string ContextInfo => $"本地文字约 {Math.Ceiling((Messages.Sum(m => (long)m.Text.Length) + Input.Length) / 2.0):N0} 标记\n仅估算本地对话文字；不含盒子历史和工具内容。\n服务端未提供上下文容量和实际用量。";
     public DesktopSettings Settings { get; }
     public string Status { get => status; set => Set(ref status, value); }
     public bool Connected { get => connected; private set => Set(ref connected, value); }
-    public bool Busy { get => busy; private set { Set(ref busy, value); Changed(nameof(CanSend)); } }
+    public bool Busy { get => busy; private set { Set(ref busy, value); Changed(nameof(CanSend)); Changed(nameof(CanManageChats)); Changed(nameof(IsResponding)); } }
+    public bool IsResponding => Busy && turn is not null;
     public bool CanSend => Connected && !Busy && Approvals.Count == 0;
     public bool CanManageChats => !Busy && Approvals.Count == 0 && !Tasks.Any(t => t.IsRunning);
     public string Input { get => input; set { Set(ref input, value); Changed(nameof(ContextInfo)); } }
@@ -93,7 +100,8 @@ public sealed class ShellViewModel : Observable, IDisposable
         foreach (FileChange change in selected.Messages.LastOrDefault(m => m.Role == "assistant")?.Changes ?? []) Changes.Add(change);
         if (!File.Exists(Path.Combine(state.DirectoryPath, "chat-index.json"))) store.Migrate(Conversations);
         state.Save("settings.json", Settings);
-        Approvals.CollectionChanged += (_, _) => { Changed(nameof(CanSend)); Changed(nameof(HasApprovals)); Changed(nameof(VisibleApprovals)); if (activeReply is not null) activeReply.AwaitingApproval = HasApprovals; };
+        Approvals.CollectionChanged += (_, _) => { Changed(nameof(CanSend)); Changed(nameof(CanManageChats)); Changed(nameof(HasApprovals)); Changed(nameof(VisibleApprovals)); if (activeReply is not null) activeReply.AwaitingApproval = HasApprovals; };
+        Tasks.CollectionChanged += (_, _) => Changed(nameof(CanManageChats));
         Changes.CollectionChanged += (_, _) => Changed(nameof(ChangeTotals));
         timer = new(TimeSpan.FromMilliseconds(800), DispatcherPriority.Background, async (_, _) => await Refresh(), Dispatcher.CurrentDispatcher);
         timer.Stop();
@@ -130,7 +138,7 @@ public sealed class ShellViewModel : Observable, IDisposable
     }
     public void RemoveProject(string path)
     {
-        if (Busy) return;
+        if (!CanManageChats) { Status = "请先结束当前任务并处理待审批请求，再移除工作区。"; return; }
         Settings.Projects.RemoveAll(p => p.Equals(path, StringComparison.OrdinalIgnoreCase));
         state.Save("settings.json", Settings); SidebarChanged();
     }
@@ -150,6 +158,19 @@ public sealed class ShellViewModel : Observable, IDisposable
         store.SaveIndex(Conversations); SidebarChanged();
     }
     private void SidebarChanged() { Changed(nameof(FilteredConversations)); Changed(nameof(Projects)); Changed(nameof(Recent)); }
+    public void RenameConversation(Conversation conversation, string title)
+    {
+        if (!CanManageChats) { Status = "请先结束当前任务并处理待审批请求。"; return; }
+        if (!Conversations.Contains(conversation)) return;
+        title = title.Trim();
+        if (title.Length is 0 or > 120 || title.Any(char.IsControl)) throw new ArgumentException("会话名称应为 1 至 120 个字符，不能包含换行。", nameof(title));
+        string original = conversation.Title;
+        conversation.Title = title;
+        try { store.Save(conversation); store.SaveIndex(Conversations); }
+        catch { conversation.Title = original; throw; }
+        if (conversation == Selected) Changed(nameof(Title));
+        SidebarChanged();
+    }
     public void SetAccess(string mode)
     {
         if (mode is not ("approval" or "readOnly" or "fullAccess")) return;
@@ -189,7 +210,7 @@ public sealed class ShellViewModel : Observable, IDisposable
         if (Attachments.Count > 0) message += "\n用户选择的 Windows 文件或项目目录（访问前请求本地审批）：\n" + string.Join("\n", Attachments);
         if (message.Length > 64000) { Status = "任务输入过长，请缩短后发送。"; return; }
         Input = ""; Attachments.Clear();
-        if (selected.Messages.Count == 0) selected.Title = message.Split('\n')[0][..Math.Min(24, message.Split('\n')[0].Length)];
+        if (selected.Messages.Count == 0 && selected.Title == "新任务") selected.Title = message.Split('\n')[0][..Math.Min(24, message.Split('\n')[0].Length)];
         Changed(nameof(Title)); Changed(nameof(FilteredConversations));
         Add(new() { Role = "user", Text = message });
         Message reply = new(); activeReply = reply;
@@ -197,10 +218,10 @@ public sealed class ShellViewModel : Observable, IDisposable
         using TurnProgress progress = new(reply);
         Changes.Clear(); tracked.Clear(); completed.Clear(); originals.Clear(); turnStarted = DateTimeOffset.UtcNow;
         Add(reply);
-        Busy = true; Status = "智能体正在处理任务…";
         userStopped = false;
         using IdleDeadline deadline = new(TimeSpan.FromMinutes(30));
         idle = deadline; turn = deadline.Source;
+        Busy = true; Status = "智能体正在处理任务…";
         try
         {
             await runtime.Gateway!.Send(selected.Id, message, Settings.Workspace, text =>

@@ -56,11 +56,53 @@ public sealed class ConversationLifecycleTests : IDisposable
             model.SetAccess("fullAccess");
             Assert.Equal("完全访问", model.AccessLabel);
             using ShellViewModel restarted = new(state);
-            Assert.Equal("逐请求审批", restarted.AccessLabel);
+            Assert.Equal("请求批准", restarted.AccessLabel);
             Assert.Contains(restarted.Conversations, c => c.Id == projectChat.Id && c.WorkspacePath == project);
             restarted.DeleteConversation(restarted.Conversations.Single(c => c.Id == projectChat.Id));
             Assert.DoesNotContain(restarted.Conversations, c => c.Id == projectChat.Id);
             Assert.True(Directory.Exists(project));
+        });
+    }
+    [Fact]
+    public void Renaming_keeps_chat_identity_workspace_and_content_and_survives_restart()
+    {
+        RunSta(() =>
+        {
+            LocalState state = new(Path.Combine(root, "desktop"));
+            using ShellViewModel model = new(state);
+            model.AddProject(Path.Combine(root, "project"));
+            Conversation conversation = model.Selected;
+            conversation.Messages.Add(new() { Text = "原始对话" });
+            DateTimeOffset updated = conversation.UpdatedAt;
+            ProjectGroup group = Assert.Single(model.Projects); group.IsExpanded = false;
+            model.RenameConversation(conversation, "  新会话名称  ");
+            Assert.Equal("新会话名称", model.Title);
+            Assert.Equal(updated, conversation.UpdatedAt);
+            Assert.False(Assert.Single(model.Projects).IsExpanded);
+            Assert.Throws<ArgumentException>(() => model.RenameConversation(conversation, "\n"));
+            Assert.Throws<ArgumentException>(() => model.RenameConversation(conversation, new string('x', 121)));
+            using ShellViewModel restarted = new(state);
+            Conversation loaded = restarted.Conversations.Single(c => c.Id == conversation.Id);
+            Assert.Equal("新会话名称", loaded.Title);
+            Assert.Equal(conversation.WorkspacePath, loaded.WorkspacePath);
+            Assert.Equal("原始对话", Assert.Single(loaded.Messages).Text);
+            restarted.NewRecent(); Conversation recent = restarted.Selected;
+            restarted.RenameConversation(recent, "最近会话");
+            Assert.Equal("最近会话", new ConversationStore(state).Load().Single(c => c.Id == recent.Id).Title);
+        });
+    }
+    [Fact]
+    public void Pending_project_command_disables_removal_and_renaming_until_completed()
+    {
+        RunSta(() =>
+        {
+            using ShellViewModel model = new(new LocalState(Path.Combine(root, "desktop")));
+            model.AddProject(Path.Combine(root, "project")); Conversation conversation = model.Selected;
+            model.Tasks.Add(new(new(Guid.NewGuid(), Guid.NewGuid(), "project.command", "running", DateTimeOffset.UtcNow, null, null, null)));
+            model.RemoveProject(conversation.WorkspacePath); model.RenameConversation(conversation, "新名字");
+            Assert.Single(model.Projects); Assert.Equal("新任务", conversation.Title);
+            model.Tasks.Clear(); model.RenameConversation(conversation, "新名字"); model.RemoveProject(conversation.WorkspacePath);
+            Assert.Empty(model.Projects); Assert.Contains(conversation, model.Recent); Assert.Equal("新名字", conversation.Title);
         });
     }
     [Fact]

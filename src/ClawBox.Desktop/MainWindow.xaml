@@ -6,10 +6,71 @@
   <shell:WindowChrome.WindowChrome><shell:WindowChrome CaptionHeight="36" CornerRadius="0" GlassFrameThickness="0" ResizeBorderThickness="6"/></shell:WindowChrome.WindowChrome>
   <Window.Resources>
     <local:HeaderWidthConverter x:Key="HeaderWidth"/>
+    <Style x:Key="HoverAction" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+      <Setter Property="Visibility" Value="Hidden"/><Setter Property="Padding" Value="8"/>
+      <Style.Triggers><DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=Grid}}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers>
+    </Style>
+    <Style x:Key="Workspace" TargetType="Expander">
+      <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Expander">
+        <Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+          <Border x:Name="WorkspaceRow" Background="Transparent" CornerRadius="8" PreviewMouseRightButtonUp="Project_RightClick">
+            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="32"/></Grid.ColumnDefinitions>
+              <ToggleButton x:Name="WorkspaceToggle" IsChecked="{Binding IsExpanded, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}" Content="{TemplateBinding Header}" Padding="7,8" Cursor="Hand" FocusVisualStyle="{x:Null}" PreviewKeyDown="Project_MenuKeyDown">
+                <ToggleButton.Template><ControlTemplate TargetType="ToggleButton"><Border Background="Transparent" Padding="{TemplateBinding Padding}"><ContentPresenter HorizontalAlignment="Stretch" VerticalAlignment="Center"/></Border></ControlTemplate></ToggleButton.Template>
+              </ToggleButton>
+              <Button x:Name="WorkspaceNew" Grid.Column="1" Click="ProjectNew_Click" Tag="{Binding Path}" ToolTip="在此工作区新建聊天" AutomationProperties.Name="在此工作区新建聊天" IsEnabled="{Binding DataContext.CanManageChats, RelativeSource={RelativeSource AncestorType=Window}}" Padding="7">
+                <Button.Style><Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="Visibility" Value="Hidden"/><Style.Triggers><DataTrigger Binding="{Binding IsMouseOver, ElementName=WorkspaceRow}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></Button.Style>
+                <TextBlock Text="&#xE70F;" FontFamily="Segoe Fluent Icons" FontSize="14"/>
+              </Button>
+            </Grid>
+          </Border>
+          <ContentPresenter x:Name="WorkspaceContent" Grid.Row="1" Content="{TemplateBinding Content}" Visibility="Collapsed"/>
+        </Grid><ControlTemplate.Triggers>
+          <Trigger Property="IsExpanded" Value="True"><Setter TargetName="WorkspaceContent" Property="Visibility" Value="Visible"/></Trigger>
+          <Trigger SourceName="WorkspaceRow" Property="IsMouseOver" Value="True"><Setter TargetName="WorkspaceRow" Property="Background" Value="#EEEDEF"/></Trigger>
+        </ControlTemplate.Triggers>
+      </ControlTemplate></Setter.Value></Setter>
+    </Style>
+    <Style x:Key="AccessChip" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+      <Setter Property="Foreground" Value="#F06A22"/><Setter Property="FontSize" Value="13"/><Setter Property="Padding" Value="7,5"/>
+      <Setter Property="Background" Value="#F3F2F2"/>
+      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+        <Border x:Name="Chip" CornerRadius="15" Padding="{TemplateBinding Padding}" Background="{TemplateBinding Background}">
+          <StackPanel Orientation="Horizontal"><TextBlock Text="&#xEA18;" FontFamily="Segoe Fluent Icons" FontSize="15" VerticalAlignment="Center" Margin="0,0,6,0"/><ContentPresenter VerticalAlignment="Center"/></StackPanel>
+        </Border><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chip" Property="Background" Value="#ECEBED"/></Trigger></ControlTemplate.Triggers>
+      </ControlTemplate></Setter.Value></Setter>
+    </Style>
+    <ContextMenu x:Key="AccessMenu" x:Shared="False" Width="404" Placement="Top" VerticalOffset="-4">
+      <MenuItem Focusable="False" StaysOpenOnClick="True" Padding="10,6,10,8">
+        <MenuItem.Template><ControlTemplate TargetType="MenuItem"><ContentPresenter ContentSource="Header" Margin="{TemplateBinding Padding}"/></ControlTemplate></MenuItem.Template>
+        <MenuItem.Header><DockPanel><Button DockPanel.Dock="Right" Click="AccessHelp_Click" Padding="0" Foreground="#929298" FontSize="11"><TextBlock Text="了解更多" TextDecorations="Underline"/></Button><TextBlock Text="应如何批准 Quantum 操作？" Foreground="#929298" FontSize="12" VerticalAlignment="Center"/></DockPanel></MenuItem.Header>
+      </MenuItem>
+      <MenuItem x:Name="RequestAccess" Tag="approval" Click="AccessMode_Click">
+        <MenuItem.Icon><TextBlock Text="&#xE815;" FontFamily="Segoe Fluent Icons" FontSize="18" Foreground="#5B5C60"/></MenuItem.Icon>
+        <MenuItem.Header><StackPanel><TextBlock Text="请求批准" FontSize="13"/><TextBlock Text="读取、修改文件和运行项目时逐次询问" Foreground="#96969C" FontSize="11" Margin="0,2,0,0"/></StackPanel></MenuItem.Header>
+      </MenuItem>
+      <MenuItem Tag="readOnly" Click="AccessMode_Click">
+        <MenuItem.Icon><TextBlock Text="&#xE890;" FontFamily="Segoe Fluent Icons" FontSize="18" Foreground="#5B5C60"/></MenuItem.Icon>
+        <MenuItem.Header><StackPanel><TextBlock Text="只读访问" FontSize="13"/><TextBlock Text="仅批准读取；不允许修改或运行项目" Foreground="#96969C" FontSize="11" Margin="0,2,0,0"/></StackPanel></MenuItem.Header>
+      </MenuItem>
+      <MenuItem Tag="fullAccess" Click="AccessMode_Click" Foreground="#F06A22">
+        <MenuItem.Icon><TextBlock Text="&#xEA18;" FontFamily="Segoe Fluent Icons" FontSize="18"/></MenuItem.Icon>
+        <MenuItem.Header><StackPanel><TextBlock Text="完全访问权限" FontSize="13"/><TextBlock Text="自动批准当前工作区内的工具请求" FontSize="11" Margin="0,2,0,0"/></StackPanel></MenuItem.Header>
+      </MenuItem>
+    </ContextMenu>
+    <Style x:Key="StopAction" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+      <Setter Property="Width" Value="34"/><Setter Property="Height" Value="34"/><Setter Property="Background" Value="{StaticResource Accent}"/>
+      <Setter Property="ToolTip" Value="停止等待并请求取消"/><Setter Property="AutomationProperties.Name" Value="停止当前对话"/>
+      <Setter Property="Visibility" Value="Collapsed"/>
+      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button"><Border x:Name="StopSurface" Background="{TemplateBinding Background}" CornerRadius="17"><Rectangle Width="10" Height="10" RadiusX="1.5" RadiusY="1.5" Fill="White"/></Border><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="StopSurface" Property="Opacity" Value="0.86"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
+      <Style.Triggers><DataTrigger Binding="{Binding IsResponding}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers>
+    </Style>
     <Style TargetType="Expander">
+      <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
       <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Expander">
         <StackPanel>
-          <ToggleButton IsChecked="{Binding IsExpanded, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}" HorizontalContentAlignment="Stretch" Foreground="{TemplateBinding Foreground}" Background="Transparent" BorderThickness="0">
+          <ToggleButton FocusVisualStyle="{x:Null}" IsChecked="{Binding IsExpanded, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}" HorizontalContentAlignment="Stretch" Foreground="{TemplateBinding Foreground}" Background="Transparent" BorderThickness="0">
             <ToggleButton.Template><ControlTemplate TargetType="ToggleButton"><Border Background="Transparent" Padding="2,5"><DockPanel>
               <TextBlock x:Name="Chevron" DockPanel.Dock="Left" Text="&#xE76C;" FontFamily="Segoe Fluent Icons" FontSize="10" Foreground="#8B898E" VerticalAlignment="Center" Margin="0,0,7,0"/>
               <ContentPresenter VerticalAlignment="Center" HorizontalAlignment="Stretch"/>
@@ -24,7 +85,7 @@
       <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
       <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Expander">
         <StackPanel>
-          <ToggleButton x:Name="ProgressToggle" Content="{TemplateBinding Header}" IsChecked="{Binding IsExpanded, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}"
+          <ToggleButton x:Name="ProgressToggle" FocusVisualStyle="{x:Null}" Content="{TemplateBinding Header}" IsChecked="{Binding IsExpanded, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}"
                         HorizontalAlignment="Left" HorizontalContentAlignment="Stretch" Foreground="{TemplateBinding Foreground}" FontSize="{TemplateBinding FontSize}"
                         Background="Transparent" BorderThickness="0" Padding="0" Cursor="Hand" AutomationProperties.Name="{Binding Header, RelativeSource={RelativeSource TemplatedParent}}">
             <ToggleButton.Template><ControlTemplate TargetType="ToggleButton">
@@ -49,12 +110,14 @@
     </Style>
     <Style x:Key="Icon" TargetType="TextBlock"><Setter Property="FontFamily" Value="Segoe Fluent Icons"/><Setter Property="FontSize" Value="17"/><Setter Property="VerticalAlignment" Value="Center"/></Style>
     <Style x:Key="ConversationItem" TargetType="ListBoxItem">
+      <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
       <Setter Property="Margin" Value="0,1"/><Setter Property="Padding" Value="12,8"/><Setter Property="HorizontalContentAlignment" Value="Stretch"/>
       <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ListBoxItem">
         <Border x:Name="Row" Background="Transparent" CornerRadius="9" Padding="{TemplateBinding Padding}"><ContentPresenter/></Border>
         <ControlTemplate.Triggers><Trigger Property="IsSelected" Value="True"><Setter TargetName="Row" Property="Background" Value="#EEECEE"/></Trigger><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Row" Property="Background" Value="#F1EFF0"/></Trigger></ControlTemplate.Triggers>
       </ControlTemplate></Setter.Value></Setter>
-      <EventSetter Event="PreviewMouseRightButtonDown" Handler="Conversation_RightClick"/>
+      <EventSetter Event="PreviewMouseRightButtonUp" Handler="Conversation_RightClick"/>
+      <EventSetter Event="PreviewKeyDown" Handler="Conversation_MenuKeyDown"/>
     </Style>
     <DataTemplate x:Key="ConversationTemplate">
       <DockPanel><TextBlock DockPanel.Dock="Right" Text="等待批准" Foreground="#1B9448" FontSize="10" Margin="6,0,0,0">
@@ -106,20 +169,20 @@
               <Button.Style><Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Style.Triggers><DataTrigger Binding="{Binding Connected}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers></Style></Button.Style>
             </Button>
           </StackPanel>
-          <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+          <ScrollViewer FocusVisualStyle="{x:Null}" Focusable="False" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
             <StackPanel>
-              <Grid Margin="0,0,0,8"><Button HorizontalAlignment="Right" Click="Project_Click" ToolTip="添加项目工作区" AutomationProperties.Name="添加项目" Padding="8"><TextBlock Style="{StaticResource Icon}" Text="&#xE710;" FontSize="15"/></Button><Expander x:Name="ProjectsSection" Header="项目" IsExpanded="True" Margin="6,8,40,0" Foreground="#8B898E" FontWeight="SemiBold"/></Grid>
+              <Grid x:Name="ProjectsHeading" Background="Transparent" Margin="0,0,0,8"><Expander x:Name="ProjectsSection" Header="项目" IsExpanded="True" Margin="6,8,40,0" Foreground="#8B898E" FontWeight="SemiBold"/><Button x:Name="AddProjectButton" Style="{StaticResource HoverAction}" HorizontalAlignment="Right" Click="Project_Click" ToolTip="添加项目工作区" AutomationProperties.Name="添加项目" IsEnabled="{Binding CanManageChats}"><TextBlock Style="{StaticResource Icon}" Text="&#xE710;" FontSize="15"/></Button></Grid>
               <ItemsControl ItemsSource="{Binding Projects}">
                 <ItemsControl.Style><Style TargetType="ItemsControl"><Style.Triggers><DataTrigger Binding="{Binding IsExpanded, ElementName=ProjectsSection}" Value="False"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers></Style></ItemsControl.Style>
                 <ItemsControl.ItemTemplate><DataTemplate>
-                  <Expander IsExpanded="True" HorizontalContentAlignment="Stretch" Margin="4,4,0,10">
-                    <Expander.Header><Button HorizontalAlignment="Left" Click="ProjectNew_Click" Tag="{Binding Path}" Padding="5,6" ToolTip="{Binding Path}"><StackPanel Orientation="Horizontal"><TextBlock Style="{StaticResource Icon}" Text="&#xE8B7;" FontSize="15" Margin="0,0,8,0"/><TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" MaxWidth="185"/></StackPanel><Button.ContextMenu><ContextMenu><MenuItem Header="移除工作区" Click="RemoveProject_Click"/></ContextMenu></Button.ContextMenu></Button></Expander.Header>
-                    <ListBox ItemsSource="{Binding Conversations}" ItemContainerStyle="{StaticResource ConversationItem}" ItemTemplate="{StaticResource ConversationTemplate}" BorderThickness="0" Background="Transparent" Margin="16,0,0,0" SelectionChanged="Conversation_SelectionChanged" Loaded="ConversationList_Loaded" ScrollViewer.HorizontalScrollBarVisibility="Disabled"/>
+                  <Expander x:Name="WorkspaceGroup" Style="{StaticResource Workspace}" IsExpanded="{Binding IsExpanded, Mode=TwoWay}" HorizontalContentAlignment="Stretch" Margin="4,4,0,10">
+                    <Expander.Header><DockPanel ToolTip="{Binding Path}"><TextBlock DockPanel.Dock="Left" Style="{StaticResource Icon}" Text="&#xE8B7;" FontSize="15" Margin="0,0,8,0"/><TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis"/></DockPanel></Expander.Header>
+                    <ListBox FocusVisualStyle="{x:Null}" ItemsSource="{Binding Conversations}" ItemContainerStyle="{StaticResource ConversationItem}" ItemTemplate="{StaticResource ConversationTemplate}" BorderThickness="0" Background="Transparent" Margin="18,0,0,0" SelectionChanged="Conversation_SelectionChanged" Loaded="ConversationList_Loaded" ScrollViewer.HorizontalScrollBarVisibility="Disabled"/>
                   </Expander>
                 </DataTemplate></ItemsControl.ItemTemplate>
               </ItemsControl>
-              <Grid Margin="0,12,0,8"><Button HorizontalAlignment="Right" Click="RecentNew_Click" ToolTip="在默认工作区新建聊天" AutomationProperties.Name="新建最近聊天" Padding="8"><TextBlock Style="{StaticResource Icon}" Text="&#xE70F;" FontSize="15"/></Button><Expander x:Name="RecentSection" Header="最近" IsExpanded="True" Margin="6,8,40,0" Foreground="#8B898E" FontWeight="SemiBold"/></Grid>
-              <ListBox x:Name="RecentList" ItemsSource="{Binding Recent}" ItemContainerStyle="{StaticResource ConversationItem}" ItemTemplate="{StaticResource ConversationTemplate}" BorderThickness="0" Background="Transparent" SelectionChanged="Conversation_SelectionChanged" Loaded="ConversationList_Loaded" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+              <Grid x:Name="RecentHeading" Background="Transparent" Margin="0,12,0,8"><Expander x:Name="RecentSection" Header="最近" IsExpanded="True" Margin="6,8,40,0" Foreground="#8B898E" FontWeight="SemiBold"/><Button x:Name="RecentNewButton" Style="{StaticResource HoverAction}" HorizontalAlignment="Right" Click="RecentNew_Click" ToolTip="在默认工作区新建聊天" AutomationProperties.Name="新建最近聊天" IsEnabled="{Binding CanManageChats}"><TextBlock Style="{StaticResource Icon}" Text="&#xE70F;" FontSize="15"/></Button></Grid>
+              <ListBox x:Name="RecentList" FocusVisualStyle="{x:Null}" ItemsSource="{Binding Recent}" ItemContainerStyle="{StaticResource ConversationItem}" ItemTemplate="{StaticResource ConversationTemplate}" BorderThickness="0" Background="Transparent" SelectionChanged="Conversation_SelectionChanged" Loaded="ConversationList_Loaded" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                 <ListBox.Style><Style TargetType="ListBox"><Style.Triggers><DataTrigger Binding="{Binding IsExpanded, ElementName=RecentSection}" Value="False"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers></Style></ListBox.Style>
               </ListBox>
             </StackPanel>
@@ -197,20 +260,21 @@
                     </StackPanel>
                   </Border>
                 </DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
-                <StackPanel Orientation="Horizontal" Margin="4,0,0,4">
-                  <StackPanel.Style><Style TargetType="StackPanel"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding HasApprovals}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></StackPanel.Style>
-                  <Button Content="{Binding AccessLabel}" Click="Access_Click" Foreground="#DA762D" FontSize="11" Padding="6"><Button.ContextMenu><ContextMenu><MenuItem Header="只读 · 仅批准读取" Click="AccessMode_Click" Tag="readOnly"/><MenuItem Header="逐请求审批" Click="AccessMode_Click" Tag="approval"/><MenuItem Header="完全访问 · 自动批准当前工作区内的请求" Click="AccessMode_Click" Tag="fullAccess"/></ContextMenu></Button.ContextMenu></Button>
-                  <Button Content="停止" Click="Stop_Click" FontSize="11"/>
-                  <TextBlock Text="{Binding Approvals.Count, StringFormat=等待批准（{0}）}" FontSize="11" Foreground="#929298" VerticalAlignment="Center" Margin="10,0"/>
-                </StackPanel>
+                <Grid Margin="4,0,16,4">
+                  <Grid.Style><Style TargetType="Grid"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding HasApprovals}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></Grid.Style>
+                  <StackPanel Orientation="Horizontal"><Button Content="{Binding AccessLabel}" Style="{StaticResource AccessChip}" ContextMenu="{StaticResource AccessMenu}" Click="Access_Click"/><TextBlock Text="{Binding Approvals.Count, StringFormat=等待批准（{0}）}" FontSize="11" Foreground="#929298" VerticalAlignment="Center" Margin="10,0"/></StackPanel>
+                  <Button x:Name="ApprovalStopButton" HorizontalAlignment="Right" Style="{StaticResource StopAction}" Click="Stop_Click"/>
+                </Grid>
                 <Border x:Name="ComposerSurface" CornerRadius="22" BorderBrush="#E9E7EA" BorderThickness="1" Background="White" Padding="16,12">
                   <Border.Style><Style TargetType="Border"><Style.Triggers><DataTrigger Binding="{Binding HasApprovals}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers></Style></Border.Style>
                   <Border.Effect><DropShadowEffect Color="#BEB7C0" Opacity="0.1" BlurRadius="18" ShadowDepth="2"/></Border.Effect>
                   <Grid><Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="34"/></Grid.RowDefinitions>
                     <TextBox x:Name="Composer" Text="{Binding Input, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="输入任务" BorderThickness="0" Background="Transparent" Padding="0,0,0,10" MinHeight="50" MaxHeight="150" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" PreviewKeyDown="Composer_KeyDown" FontSize="14"/>
                     <TextBlock Text="输入任务，或选择文件开始…" Foreground="#A29CA5" FontSize="14" IsHitTestVisible="False"><TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding Input}" Value=""><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock><DockPanel Grid.Row="1">
-                      <StackPanel DockPanel.Dock="Right" Orientation="Horizontal"><Button ToolTip="{Binding ContextInfo}" Padding="8" AutomationProperties.Name="上下文窗口信息"><TextBlock Style="{StaticResource Icon}" Text="&#xE9F9;" FontSize="14"/></Button><TextBlock Text="Qwen · 盒子智能体" Foreground="#78727C" FontSize="11" VerticalAlignment="Center" Margin="4,0,10,0"/><Button x:Name="StopButton" Click="Stop_Click" ToolTip="停止等待并请求取消" Margin="0,0,6,0" Visibility="Collapsed"><TextBlock Style="{StaticResource Icon}" Text="&#xE71A;" FontSize="14"/></Button><Button x:Name="SendButton" Click="Send_Click" IsEnabled="{Binding CanSend}" Background="{StaticResource Accent}" Width="34" Height="34" Padding="7" ToolTip="发送（Ctrl+Enter）"><TextBlock Style="{StaticResource Icon}" Text="&#xE74A;" Foreground="White" FontSize="18"/></Button></StackPanel>
-                      <StackPanel Orientation="Horizontal"><Button Click="Attach_Click" ToolTip="选择文件" Padding="0,6,8,6"><TextBlock Style="{StaticResource Icon}" Text="&#xE710;"/></Button><Button x:Name="AccessButton" Content="{Binding AccessLabel}" Click="Access_Click" Foreground="#DA762D" FontSize="11" Padding="6" ToolTip="访问权限"><Button.ContextMenu><ContextMenu><MenuItem Header="只读 · 仅批准读取" Click="AccessMode_Click" Tag="readOnly"/><MenuItem Header="逐请求审批" Click="AccessMode_Click" Tag="approval"/><MenuItem Header="完全访问 · 自动批准当前工作区内的请求" Click="AccessMode_Click" Tag="fullAccess"/></ContextMenu></Button.ContextMenu></Button></StackPanel>
+                      <StackPanel DockPanel.Dock="Right" Orientation="Horizontal"><Button ToolTip="{Binding ContextInfo}" Padding="8" AutomationProperties.Name="上下文窗口信息"><TextBlock Style="{StaticResource Icon}" Text="&#xE9F9;" FontSize="14"/></Button><TextBlock Text="Qwen · 盒子智能体" Foreground="#78727C" FontSize="11" VerticalAlignment="Center" Margin="4,0,10,0"/>
+                        <Grid Width="34" Height="34"><Button x:Name="SendButton" Click="Send_Click" IsEnabled="{Binding CanSend}" Background="{StaticResource Accent}" Padding="7" ToolTip="发送（Ctrl+Enter）"><Button.Style><Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Style.Triggers><DataTrigger Binding="{Binding IsResponding}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers></Style></Button.Style><TextBlock Style="{StaticResource Icon}" Text="&#xE74A;" Foreground="White" FontSize="18"/></Button><Button x:Name="StopButton" Style="{StaticResource StopAction}" Click="Stop_Click"/></Grid>
+                      </StackPanel>
+                      <StackPanel Orientation="Horizontal"><Button Click="Attach_Click" ToolTip="选择文件" Padding="0,6,8,6"><TextBlock Style="{StaticResource Icon}" Text="&#xE710;"/></Button><Button x:Name="AccessButton" Content="{Binding AccessLabel}" Style="{StaticResource AccessChip}" ContextMenu="{StaticResource AccessMenu}" Click="Access_Click" ToolTip="访问权限"/></StackPanel>
                     </DockPanel>
                   </Grid>
                 </Border>

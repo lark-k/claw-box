@@ -14,6 +14,7 @@ public partial class MainWindow : Window
     private readonly bool preview;
     private bool paneOpen;
     private bool syncingSelection;
+    internal ContextMenu? SidebarMenu { get; private set; }
     public MainWindow(ShellViewModel model, bool preview = false)
     {
         this.preview = preview;
@@ -29,7 +30,6 @@ public partial class MainWindow : Window
         model.Approvals.CollectionChanged += (_, _) => { if (model.Approvals.Count > 0) Dispatcher.BeginInvoke(() => ComposerSurface.BringIntoView()); };
         model.PropertyChanged += (_, args) =>
         {
-            if (args.PropertyName == nameof(model.Busy)) StopButton.Visibility = model.Busy ? Visibility.Visible : Visibility.Collapsed;
             if (args.PropertyName == nameof(model.Selected)) SyncSelection();
         };
         Welcome.Visibility = model.Messages.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -49,22 +49,28 @@ public partial class MainWindow : Window
     private void ProjectNew_Click(object sender, RoutedEventArgs e)
     {
         if (((Button)sender).Tag is not string path) return;
-        Models.Conversation? conversation = Model.Conversations.Where(c => c.WorkspacePath.Equals(path, StringComparison.OrdinalIgnoreCase)).OrderByDescending(c => c.UpdatedAt).FirstOrDefault();
-        if (conversation is null) Model.AddProject(path); else Model.Selected = conversation;
+        Model.AddProject(path);
+        e.Handled = true;
     }
     private void Access_Click(object sender, RoutedEventArgs e)
     {
         Button button = (Button)sender;
+        button.ContextMenu.DataContext = Model;
+        foreach (MenuItem item in button.ContextMenu.Items.OfType<MenuItem>()) item.IsChecked = item.Tag is string mode && mode == Model.Settings.AccessMode;
         button.ContextMenu.PlacementTarget = button;
         button.ContextMenu.Placement = System.Windows.Controls.Primitives.PlacementMode.Top;
         button.ContextMenu.IsOpen = true;
     }
     private void AccessMode_Click(object sender, RoutedEventArgs e) { if (((MenuItem)sender).Tag is string mode) Model.SetAccess(mode); }
+    private void AccessHelp_Click(object sender, RoutedEventArgs e) => MessageBox.Show(this,
+        "请求批准：每次工具请求都由你确认。\n只读访问：仅允许批准读取操作。\n完全访问：APP 自动批准当前工作区内通过路径和参数校验的请求。\n\n切换工作区、重连或重启后恢复请求批准。", "访问权限", MessageBoxButton.OK, MessageBoxImage.Information);
     private void DeleteConversation_Click(object sender, RoutedEventArgs e)
     {
-        if (((MenuItem)sender).Parent is ContextMenu menu && menu.PlacementTarget is ListBoxItem row && row.DataContext is Models.Conversation conversation)
+        if (SidebarMenu is not null) SidebarMenu.IsOpen = false;
+        if (((MenuItem)sender).Tag is Models.Conversation conversation && Model.CanManageChats)
         {
-            if (MessageBox.Show(this, "删除该会话和本地对话记录？工作区、附件和用户文件会保留。", "删除会话", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+            ConversationDialog dialog = new(conversation.Title, rename: false) { Owner = this };
+            if (dialog.ShowDialog() != true) return;
             try { Model.DeleteConversation(conversation); }
             catch (Exception error) when (error is IOException or UnauthorizedAccessException) { MessageBox.Show(this, error.Message, "会话未删除"); }
         }
@@ -72,14 +78,74 @@ public partial class MainWindow : Window
     private void Conversation_RightClick(object sender, MouseButtonEventArgs e)
     {
         ListBoxItem row = (ListBoxItem)sender;
-        MenuItem delete = new() { Header = "删除会话" };
-        delete.Click += DeleteConversation_Click;
-        ContextMenu menu = new() { PlacementTarget = row };
-        menu.Items.Add(delete); row.ContextMenu = menu; menu.IsOpen = true; e.Handled = true;
+        if (row.DataContext is not Models.Conversation conversation) return;
+        e.Handled = true;
+        OpenConversationMenu(row, conversation);
+    }
+    private void Conversation_MenuKeyDown(object sender, KeyEventArgs e)
+    {
+        if (!MenuKey(e) || ((ListBoxItem)sender).DataContext is not Models.Conversation conversation) return;
+        e.Handled = true; OpenConversationMenu((ListBoxItem)sender, conversation, keyboard: true);
+    }
+    private static bool MenuKey(KeyEventArgs e) => e.Key == Key.Apps || (e.Key == Key.F10 && Keyboard.Modifiers == ModifierKeys.Shift);
+    private void RenameConversation_Click(object sender, RoutedEventArgs e)
+    {
+        if (SidebarMenu is not null) SidebarMenu.IsOpen = false;
+        if (((MenuItem)sender).Tag is not Models.Conversation conversation || !Model.CanManageChats) return;
+        ConversationDialog dialog = new(conversation.Title, rename: true) { Owner = this };
+        if (dialog.ShowDialog() != true) return;
+        try { Model.RenameConversation(conversation, dialog.ConversationName); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException) { MessageBox.Show(this, error.Message, "会话未重命名"); }
+    }
+    internal void OpenConversationMenu(FrameworkElement row, Models.Conversation conversation, bool keyboard = false)
+    {
+        ContextMenu menu = new();
+        menu.Items.Add(SidebarAction("重命名", "\uE70F", conversation, RenameConversation_Click));
+        menu.Items.Add(new Separator());
+        menu.Items.Add(SidebarAction("永久删除", "\uE74D", conversation, DeleteConversation_Click));
+        OpenSidebarMenu(row, menu, keyboard);
+    }
+    private MenuItem SidebarAction(string label, string icon, object target, RoutedEventHandler click)
+    {
+        MenuItem item = new()
+        {
+            Header = label,
+            Tag = target,
+            Icon = new TextBlock { Text = icon, FontFamily = new("Segoe Fluent Icons"), FontSize = 16, VerticalAlignment = VerticalAlignment.Center }
+        };
+        item.SetBinding(IsEnabledProperty, new System.Windows.Data.Binding(nameof(Model.CanManageChats)) { Source = Model });
+        item.ToolTip = "任务处理中或存在待审批请求时，此操作不可用。"; ToolTipService.SetShowOnDisabled(item, true);
+        item.Click += click; return item;
+    }
+    private void OpenSidebarMenu(FrameworkElement row, ContextMenu menu, bool keyboard)
+    {
+        if (SidebarMenu is not null) SidebarMenu.IsOpen = false;
+        SidebarMenu = menu;
+        menu.PlacementTarget = row;
+        menu.Placement = keyboard ? System.Windows.Controls.Primitives.PlacementMode.Bottom : System.Windows.Controls.Primitives.PlacementMode.MousePoint;
+        menu.Closed += (_, _) => { if (ReferenceEquals(SidebarMenu, menu)) SidebarMenu = null; };
+        menu.IsOpen = true;
+    }
+    private void Project_RightClick(object sender, MouseButtonEventArgs e)
+    {
+        if (((FrameworkElement)sender).DataContext is not Models.ProjectGroup group) return;
+        e.Handled = true; OpenProjectMenu((FrameworkElement)sender, group.Path);
+    }
+    private void Project_MenuKeyDown(object sender, KeyEventArgs e)
+    {
+        if (!MenuKey(e) || ((FrameworkElement)sender).DataContext is not Models.ProjectGroup group) return;
+        e.Handled = true; OpenProjectMenu((FrameworkElement)sender, group.Path, keyboard: true);
+    }
+    internal void OpenProjectMenu(FrameworkElement row, string path, bool keyboard = false)
+    {
+        ContextMenu menu = new();
+        menu.Items.Add(SidebarAction("移除工作区", "\uE8F2", path, RemoveProject_Click));
+        OpenSidebarMenu(row, menu, keyboard);
     }
     private void RemoveProject_Click(object sender, RoutedEventArgs e)
     {
-        if (((MenuItem)sender).Parent is ContextMenu menu && menu.PlacementTarget is Button button && button.Tag is string path) Model.RemoveProject(path);
+        if (SidebarMenu is not null) SidebarMenu.IsOpen = false;
+        if (((MenuItem)sender).Tag is string path) Model.RemoveProject(path);
     }
     private void Conversation_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {

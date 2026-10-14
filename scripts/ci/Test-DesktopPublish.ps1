@@ -12,11 +12,15 @@ $process=Start-Process -FilePath (Join-Path $package 'QuantumHarness.exe') -Argu
 if (-not $process.WaitForExit(60000)) { $process.Kill(); throw 'Desktop visual smoke timed out.' }
 if ($process.ExitCode -ne 0) { throw 'Published desktop EXE failed.' }
 Add-Type -AssemblyName System.Drawing
-foreach ($name in @('chat.png','approval.png','compact.png','thinking-start.png','thinking-scan.png','thinking-progress.png','thinking-complete.png','thinking-review.png','bubble-wrap.png','inline-progress-expanded.png','inline-progress-collapsed.png','stream-whitespace.png','stream-next-line.png','stream-empty-progress.png')) {
+foreach ($name in @('chat.png','approval.png','compact.png','thinking-start.png','thinking-scan.png','thinking-progress.png','thinking-complete.png','thinking-review.png','bubble-wrap.png','inline-progress-expanded.png','inline-progress-collapsed.png','stream-whitespace.png','stream-next-line.png','stream-empty-progress.png','sidebar-idle.png','sidebar-hover.png','workspace-collapsed.png','sidebar-renamed.png','sidebar-deleted.png','sidebar-focus.png','send-stop.png','send-restored.png')) {
     $bitmap=[Drawing.Bitmap]::new((Join-Path $destination $name))
     try {
         if ($bitmap.Width -lt 900 -or $bitmap.Height -lt 600 -or $bitmap.GetPixel(50,40).A -eq 0) { throw 'Invalid desktop rendering.' }
     } finally { $bitmap.Dispose() }
+}
+foreach ($name in @('conversation-menu.png','workspace-menu.png','access-menu.png','access-menu-selected.png')) {
+    $bitmap=[Drawing.Bitmap]::new((Join-Path $destination $name))
+    try { if ($bitmap.Width -lt 200 -or $bitmap.Height -lt 50) { throw 'Invalid popup rendering.' } } finally { $bitmap.Dispose() }
 }
 if ((Get-FileHash (Join-Path $destination 'chat.png')).Hash -eq (Get-FileHash (Join-Path $destination 'approval.png')).Hash) { throw 'Approval UI did not render.' }
 Write-Host "Self-contained desktop EXE and visual states passed: $destination"

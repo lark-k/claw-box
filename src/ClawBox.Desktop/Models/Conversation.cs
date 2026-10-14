@@ -102,9 +102,12 @@ public sealed class FileChange
     [JsonIgnore] public string Removed => HasDiff ? "-" + Lines.Count(l => l.Kind == "removed") : "";
 }
 
-public sealed class ProjectGroup(string path, IEnumerable<Conversation> conversations)
+public sealed class ProjectGroup(string path, IEnumerable<Conversation> conversations) : Observable
 {
+    private bool expanded = true;
+    private IEnumerable<Conversation> chats = conversations;
     public string Path { get; } = path;
     public string Name => System.IO.Path.GetFileName(System.IO.Path.TrimEndingDirectorySeparator(Path));
-    public IEnumerable<Conversation> Conversations { get; } = conversations;
+    public IEnumerable<Conversation> Conversations { get => chats; set => Set(ref chats, value); }
+    public bool IsExpanded { get => expanded; set => Set(ref expanded, value); }
 }
