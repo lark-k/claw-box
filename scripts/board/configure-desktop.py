@@ -68,6 +68,7 @@ def main():
     config_path = home / ".openclaw" / "openclaw.json"
     original = config_path.read_text()
     config = json.loads(original)
+    original_config = json.loads(original)
     gateway = config["gateway"]
     if gateway.get("bind") != "loopback" or gateway.get("auth", {}).get("mode") != "token":
         raise SystemExit("Require authenticated loopback gateway.")
@@ -76,17 +77,33 @@ def main():
         raise SystemExit("Provision a literal gateway token in the existing private configuration first.")
     gateway.setdefault("http", {}).setdefault("endpoints", {}).setdefault("chatCompletions", {})["enabled"] = True
     configure_agent(config, home)
-    atomic(config_path, json.dumps(config, ensure_ascii=False, indent=2))
+    config_changed = config != original_config
+    keys_changed = lines != original_keys.splitlines()
+    secret = home / ".openclaw" / "deployment" / "quantum-harness-gateway.secrets.json"
     try:
-        subprocess.run(["openclaw", "config", "validate"], check=True, timeout=120)
-        atomic(keys, "\n".join(lines) + "\n")
-        secret = home / ".openclaw" / "deployment" / "quantum-harness-gateway.secrets.json"
-        atomic(secret, json.dumps({"token": token}))
+        secret_ready = (secret.stat().st_size <= 4096 and (os.name == "nt" or secret.stat().st_mode & 0o077 == 0)
+                        and json.loads(secret.read_text()) == {"token": token})
+    except (OSError, ValueError):
+        secret_ready = False
+    if not config_changed and not keys_changed and secret_ready:
+        print("CLAWBOX_RESULT=reused")
+        return
+    if config_changed:
+        atomic(config_path, json.dumps(config, ensure_ascii=False, indent=2))
+    try:
+        if config_changed:
+            subprocess.run(["openclaw", "config", "validate"], check=True, timeout=120)
+        if keys_changed:
+            atomic(keys, "\n".join(lines) + "\n")
+        if not secret_ready:
+            atomic(secret, json.dumps({"token": token}))
     except (subprocess.SubprocessError, OSError):
-        atomic(config_path, original)
-        atomic(keys, original_keys)
+        if config_changed:
+            atomic(config_path, original)
+        if keys_changed:
+            atomic(keys, original_keys)
         raise SystemExit("Desktop configuration failed; original settings restored.")
-    print("Authenticated desktop ingress configured. Gateway credential exported privately.")
+    print("CLAWBOX_RESULT=" + ("configured" if config_changed else "paired"))
 
 
 if __name__ == "__main__":

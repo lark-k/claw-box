@@ -22,5 +22,13 @@ foreach ($name in @('conversation-menu.png','workspace-menu.png','access-menu.pn
     $bitmap=[Drawing.Bitmap]::new((Join-Path $destination $name))
     try { if ($bitmap.Width -lt 200 -or $bitmap.Height -lt 50) { throw 'Invalid popup rendering.' } } finally { $bitmap.Dispose() }
 }
+foreach ($name in @('connection-guide-missing.png','connection-guide-board.png','connection-guide-progress.png','connection-guide-ready.png','connection-guide-compact.png')) {
+    $bitmap=[Drawing.Bitmap]::new((Join-Path $destination $name))
+    try { if ($bitmap.Width -lt 700 -or $bitmap.Height -lt 450) { throw 'Invalid connection guide rendering.' } } finally { $bitmap.Dispose() }
+}
+foreach ($name in @('ethernet-ip-settings.png','connection-import.png')) {
+    $bitmap=[Drawing.Bitmap]::new((Join-Path $destination $name))
+    try { if ($bitmap.Width -lt 550 -or $bitmap.Height -lt 300) { throw 'Invalid connection settings popup rendering.' } } finally { $bitmap.Dispose() }
+}
 if ((Get-FileHash (Join-Path $destination 'chat.png')).Hash -eq (Get-FileHash (Join-Path $destination 'approval.png')).Hash) { throw 'Approval UI did not render.' }
 Write-Host "Self-contained desktop EXE and visual states passed: $destination"

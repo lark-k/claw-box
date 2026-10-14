@@ -12,6 +12,7 @@ public partial class MainWindow : Window
 {
     public ShellViewModel Model { get; }
     private readonly bool preview;
+    private bool startupAttempted;
     private bool paneOpen;
     private bool syncingSelection;
     internal ContextMenu? SidebarMenu { get; private set; }
@@ -34,7 +35,15 @@ public partial class MainWindow : Window
         };
         Welcome.Visibility = model.Messages.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
     }
-    private async void Window_Loaded(object sender, RoutedEventArgs e) { if (!preview) await Model.Connect(); }
+    private async void Window_Loaded(object sender, RoutedEventArgs e)
+    {
+        if (preview || startupAttempted) return;
+        startupAttempted = true;
+        if (await TryConnectOnStartup(Model.Settings, async () => { await Model.Connect(); return Model.Connected; })) return;
+        ShowConnectionGuide();
+    }
+    internal static async Task<bool> TryConnectOnStartup(ClawBox.Desktop.Models.DesktopSettings settings, Func<Task<bool>> connect)
+        => File.Exists(settings.ProfilePath) && File.Exists(settings.GatewayTokenFile) && await connect();
     private void Window_Closing(object? sender, CancelEventArgs e) => Model.Dispose();
     private void Window_SizeChanged(object sender, SizeChangedEventArgs e)
     {
@@ -170,7 +179,12 @@ public partial class MainWindow : Window
             foreach (T descendant in Descendants<T>(child)) yield return descendant;
         }
     }
-    private async void Connect_Click(object sender, RoutedEventArgs e) => await Model.Connect();
+    private async void Connect_Click(object sender, RoutedEventArgs e)
+    {
+        if (Model.Busy) return;
+        if (File.Exists(Model.Settings.ProfilePath) && File.Exists(Model.Settings.GatewayTokenFile)) await Model.Connect();
+        if (!Model.Connected) ShowConnectionGuide();
+    }
     private async void Send_Click(object sender, RoutedEventArgs e) => await Model.Send();
     private async void Stop_Click(object sender, RoutedEventArgs e) => await Model.Stop();
     private async void Approve_Click(object sender, RoutedEventArgs e) { if (((Button)sender).Tag is ApprovalCard card) await Model.Decide(card, true); }
@@ -247,19 +261,24 @@ public partial class MainWindow : Window
         if (!Model.Connected && !Model.Busy) await Model.Connect();
     }
     private void Help_Click(object sender, RoutedEventArgs e) => MessageBox.Show(this,
-        "1. 保持盒子电源、网线与网络共享开启。\n2. 点击连接盒子。\n3. 选择文件并输入任务，Ctrl+Enter 发送。\n4. 查看审批卡片的完整参数，再批准或拒绝。\n5. 核对执行记录与结果文件。\n\n选择工作区外的文件时会复制到工作区，原文件保持不变。",
+        "1. 保持盒子电源、网线与网络共享开启。\n2. 首次使用或连接失败时，按连接引导中的检测结果操作；也可从连接与设置重新打开引导。\n3. 选择文件并输入任务，Ctrl+Enter 发送。\n4. 查看审批卡片的完整参数，再批准或拒绝。\n5. 核对执行记录与结果文件。\n\n选择工作区外的文件时会复制到工作区，原文件保持不变。",
         "Quantum Harness 使用帮助", MessageBoxButton.OK, MessageBoxImage.Information);
     private void Settings_Click(object sender, RoutedEventArgs e)
     {
         if (!Model.CanManageChats) { Model.Status = "请先结束当前任务，再修改连接设置。"; return; }
-        SettingsWindow dialog = new(Model.Settings) { Owner = this };
-        if (dialog.ShowDialog() == true)
+        ShowConnectionGuide();
+    }
+    private void ShowConnectionGuide()
+    {
+        if (!Model.CanManageChats) return;
+        ConnectionSetupWindow guide = new(Model.Settings, async cancellation =>
         {
-            string workspace = Model.Settings.Workspace;
             Model.SaveSettings();
-            if (!workspace.Equals(Model.Selected.WorkspacePath, StringComparison.OrdinalIgnoreCase)) Model.AddProject(workspace);
-            Model.Status = "设置已保存，点击连接盒子应用。";
-        }
+            await Model.Connect(cancellation);
+            return Model.Connected ? null : Model.Status;
+        }, saveConfiguration: Model.SaveSettings)
+        { Owner = this };
+        guide.ShowDialog();
     }
     public void PreviewPane() => ShowPane(true);
 }

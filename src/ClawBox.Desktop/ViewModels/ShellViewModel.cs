@@ -187,7 +187,7 @@ public sealed class ShellViewModel : Observable, IDisposable
         state.Save("settings.json", Settings);
         Changed(nameof(WorkspacePath));
     }
-    public async Task Connect()
+    public async Task Connect(CancellationToken cancellation = default)
     {
         if (Busy) return;
         Settings.AccessMode = "approval"; Changed(nameof(AccessLabel)); automatic.Reset();
@@ -195,12 +195,13 @@ public sealed class ShellViewModel : Observable, IDisposable
         Status = "正在连接盒子…";
         try
         {
-            await runtime.Start(Settings, CancellationToken.None);
+            await runtime.Start(Settings, cancellation);
             Connected = true; Status = "盒子已连接"; timer.Start();
             Changed(nameof(CanSend));
         }
         catch (Exception error) when (error is IOException or InvalidOperationException or JsonException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
         { Status = error.Message; }
+        catch (OperationCanceledException) { Status = "连接已停止，请检查网络后重试。"; }
         finally { Busy = false; }
     }
     public async Task Send()

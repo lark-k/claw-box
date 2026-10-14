@@ -78,6 +78,59 @@ class InstallerTests(unittest.TestCase):
             self.run_installer()
         self.assertEqual(json.loads(self.config_path.read_text()), self.config)
 
+    def fresh_stage(self, name, worker="a" * 64):
+        previous = self.stage
+        self.stage = self.state / "deployment" / installer.PLUGIN_ID / name
+        self.stage.mkdir()
+        for filename in installer.FILES:
+            (self.stage / filename).write_bytes((previous / filename).read_bytes())
+        (self.stage / "worker-token").write_text(worker)
+
+    def test_repeat_reuses_code_credentials_and_configuration_without_validation_or_backup(self):
+        self.run_installer()
+        original = self.config_path.read_bytes()
+        backups = list((self.state / "deployment").glob("pre-phase7-*.json"))
+        loaded = json.loads(original)["plugins"]["load"]["paths"]
+        self.fresh_stage("repeat")
+        self.run_installer().assert_not_called()
+        self.assertEqual(original, self.config_path.read_bytes())
+        self.assertEqual(backups, list((self.state / "deployment").glob("pre-phase7-*.json")))
+        self.assertFalse((self.stage / "plugin").exists())
+        self.assertEqual(loaded, json.loads(self.config_path.read_text())["plugins"]["load"]["paths"])
+
+    def test_new_computer_updates_only_worker_binding_and_keeps_loaded_plugin_code(self):
+        self.run_installer()
+        first = json.loads(self.config_path.read_text())
+        old_worker = pathlib.Path(first["plugins"]["entries"][installer.PLUGIN_ID]["config"]["workerTokenFile"])
+        self.fresh_stage("friend", "b" * 64)
+        self.run_installer().assert_called_once()
+        second = json.loads(self.config_path.read_text())
+        self.assertEqual(first["plugins"]["load"], second["plugins"]["load"])
+        self.assertFalse((self.stage / "plugin").exists())
+        self.assertEqual("a" * 64, old_worker.read_text())
+        self.assertEqual(str(self.stage / "worker-token"), second["plugins"]["entries"][installer.PLUGIN_ID]["config"]["workerTokenFile"])
+
+    def test_changed_plugin_content_is_updated_without_duplicating_load_paths(self):
+        self.run_installer()
+        self.fresh_stage("update")
+        with (self.stage / "client.js").open("a") as file:
+            file.write("\n// newer compatible build\n")
+        self.run_installer().assert_called_once()
+        paths = json.loads(self.config_path.read_text())["plugins"]["load"]["paths"]
+        self.assertEqual([str(self.stage / "plugin")], paths)
+        self.assertEqual((self.stage / "client.js").read_bytes(), (self.stage / "plugin/client.js").read_bytes())
+
+    def test_failed_new_computer_binding_keeps_previous_worker_and_code(self):
+        self.run_installer()
+        first = json.loads(self.config_path.read_text())
+        old_worker = pathlib.Path(first["plugins"]["entries"][installer.PLUGIN_ID]["config"]["workerTokenFile"])
+        self.fresh_stage("friend-fails", "b" * 64)
+        with self.assertRaises(SystemExit):
+            self.run_installer(subprocess.CalledProcessError(1, "openclaw"))
+        self.assertEqual(first, json.loads(self.config_path.read_text()))
+        self.assertEqual("a" * 64, old_worker.read_text())
+        self.assertFalse((self.stage / "plugin").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

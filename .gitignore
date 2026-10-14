@@ -34,6 +34,10 @@ appsettings.Local.json
 *.sqlite-*
 *.db
 *.log
+# Native crash dumps and Windows diagnostic captures.
+*.dmp
+*.mdmp
+*.etl
 *.pfx
 *.pem
 *.key
@@ -42,6 +46,7 @@ appsettings.Local.json
 **/known_hosts
 **/tunnel_ed25519
 **/tunnel_ed25519.pub
+**/worker-token
 **/id_ed25519
 **/id_rsa
 packages/
@@ -49,3 +54,4 @@ Thumbs.db
 .DS_Store
 __pycache__/
 *.pyc
+*.pyo

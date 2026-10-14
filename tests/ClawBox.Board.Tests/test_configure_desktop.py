@@ -32,8 +32,9 @@ class DesktopConfigurationTests(unittest.TestCase):
         self.temp.cleanup()
 
     def run_installer(self, failure=None):
-        with patch.object(pathlib.Path, "home", return_value=self.home), patch.object(sys, "argv", [str(SOURCE), str(self.public)]), patch.object(installer.subprocess, "run", side_effect=failure):
+        with patch.object(pathlib.Path, "home", return_value=self.home), patch.object(sys, "argv", [str(SOURCE), str(self.public)]), patch.object(installer.subprocess, "run", side_effect=failure) as validate:
             installer.main()
+            return validate
 
     def test_ingress_is_authenticated_restricted_and_idempotent(self):
         self.run_installer()
@@ -88,6 +89,28 @@ class DesktopConfigurationTests(unittest.TestCase):
         self.run_installer()
         actual = json.loads(self.config.read_text())
         self.assertEqual(actual["agents"]["entries"]["main"], config["agents"]["entries"]["main"])
+
+    def test_repeat_does_not_write_configuration_keys_or_secret_and_skips_validate(self):
+        self.run_installer()
+        original = self.config.read_bytes()
+        keys = self.keys.read_bytes()
+        with patch.object(installer, "atomic", side_effect=AssertionError("No existing files should be rewritten")):
+            self.run_installer().assert_not_called()
+        self.assertEqual(original, self.config.read_bytes())
+        self.assertEqual(keys, self.keys.read_bytes())
+
+    def test_new_computer_extends_only_new_key_without_rewriting_agent_config(self):
+        self.run_installer()
+        original = self.config.read_bytes()
+        old_key = self.keys.read_text()
+        self.public.write_text("ssh-ed25519 AAANEWKEY clawbox-reverse-tunnel")
+        self.keys.write_text(old_key + self.original_keys.replace("AAAATEST", "AAANEWKEY"))
+        real_atomic = installer.atomic
+        with patch.object(installer, "atomic", wraps=real_atomic) as write:
+            self.run_installer().assert_not_called()
+            self.assertEqual([self.keys], [call.args[0] for call in write.call_args_list])
+        self.assertEqual(original, self.config.read_bytes())
+        self.assertTrue(self.keys.read_text().startswith(old_key))
 
 
 if __name__ == "__main__":

@@ -1,8 +1,9 @@
 using System.Diagnostics;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Net;
+using System.Net.Sockets;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using ClawBox.Desktop.Models;
 
 namespace ClawBox.Desktop.Services;
@@ -10,6 +11,7 @@ namespace ClawBox.Desktop.Services;
 public sealed class RuntimeSession : IDisposable
 {
     private readonly List<Process> owned = [];
+    private OwnedProcessJob? job;
     public ExecutorClient? Executor { get; private set; }
     public GatewayClient? Gateway { get; private set; }
     public bool Alive => owned.Count == 2 && owned.All(p => !p.HasExited);
@@ -18,16 +20,14 @@ public sealed class RuntimeSession : IDisposable
         Dispose();
         try
         {
-            Profile profile = JsonSerializer.Deserialize<Profile>(ConnectionFiles.Read(settings.ProfilePath, "盒子配对文件"),
-                new JsonSerializerOptions(JsonSerializerDefaults.Web)) ?? throw new InvalidOperationException("配对文件无效。");
-            profile.Validate();
+            BoardConnectionProfile profile = BoardConnectionProfile.Load(settings.ProfilePath);
             using JsonDocument gatewaySecret = JsonDocument.Parse(ConnectionFiles.Read(settings.GatewayTokenFile, "网关凭据文件"));
             string gatewayToken = Secret(gatewaySecret.RootElement, "token");
             if (gatewayToken.Length < 32 || gatewayToken.Any(char.IsControl)) throw new InvalidOperationException("网关凭据无效。");
             string state = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ClawBox", "executor");
             LocalState.MakePrivate(state);
             string tokensFile = Path.Combine(state, "tokens.secrets.json");
-            if (!File.Exists(tokensFile)) throw new InvalidOperationException("请先配置本地执行器凭据，见运行指南。");
+            if (!File.Exists(tokensFile)) throw new InvalidOperationException("缺少本地执行器凭据。新设备请在连接引导中完成绑定；已有设备请让管理员恢复原凭据，避免与板子配置不一致。");
             using JsonDocument tokens = JsonDocument.Parse(File.ReadAllText(tokensFile));
             string admin = Secret(tokens.RootElement, "adminToken");
             string worker = Secret(tokens.RootElement, "workerToken");
@@ -44,16 +44,8 @@ public sealed class RuntimeSession : IDisposable
                 if (check.ExitCode != 0 || fingerprint.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).ElementAtOrDefault(1) != profile.HostKeyFingerprint)
                     throw new InvalidOperationException("盒子主机密钥与配对记录不一致，连接已停止。");
             }
-            using (HttpClient probe = CreateHealthClient())
-            {
-                try
-                {
-                    using HttpResponseMessage response = await probe.GetAsync($"http://127.0.0.1:{profile.ExecutorPort}/healthz", cancellation);
-                    throw new InvalidOperationException("本地执行器端口已被占用，请关闭之前手动启动的执行器后连接。");
-                }
-                catch (HttpRequestException) { }
-                catch (TaskCanceledException) when (!cancellation.IsCancellationRequested) { }
-            }
+            EnsurePortAvailable(profile.ExecutorPort);
+            EnsurePortAvailable(profile.GatewayLocalPort);
             ProcessStartInfo executor = Hidden(executable);
             executor.WorkingDirectory = Path.GetDirectoryName(executable)!;
             foreach (string name in executor.Environment.Keys.Where(n => n.StartsWith("Executor__", StringComparison.Ordinal)).ToArray()) executor.Environment.Remove(name);
@@ -107,11 +99,26 @@ public sealed class RuntimeSession : IDisposable
     }
     private void Launch(ProcessStartInfo info)
     {
+        job ??= new OwnedProcessJob();
         Process process = Process.Start(info) ?? throw new InvalidOperationException("后台服务启动失败。");
+        try { job.Add(process); }
+        catch
+        {
+            try { if (!process.HasExited) { process.Kill(entireProcessTree: true); process.WaitForExit(3000); } }
+            finally { process.Dispose(); }
+            throw;
+        }
         owned.Add(process);
         // Drain output without recording credentials, documents or arbitrary process diagnostics.
         _ = Drain(process.StandardOutput);
         _ = Drain(process.StandardError);
+    }
+    internal static void EnsurePortAvailable(int port)
+    {
+        using TcpListener probe = new(IPAddress.Loopback, port);
+        try { probe.Start(); }
+        catch (SocketException error)
+        { throw new InvalidOperationException($"本地端口 {port} 无法使用，可能被旧版 APP、手动执行器或其他程序占用。请关闭对应程序后点击“使用已有配对连接”；无需重新绑定板子。", error); }
     }
     private static async Task Drain(StreamReader stream)
     {
@@ -145,6 +152,7 @@ public sealed class RuntimeSession : IDisposable
     public void Dispose()
     {
         Gateway?.Dispose(); Executor?.Dispose(); Gateway = null; Executor = null;
+        job?.Dispose(); job = null;
         foreach (Process process in owned.AsEnumerable().Reverse())
         {
             try { if (!process.HasExited) { process.Kill(entireProcessTree: true); process.WaitForExit(3000); } }
@@ -152,27 +160,5 @@ public sealed class RuntimeSession : IDisposable
             finally { process.Dispose(); }
         }
         owned.Clear();
-    }
-    private sealed class Profile
-    {
-        public int Version { get; set; }
-        public string BoxHost { get; set; } = "";
-        public string SshUser { get; set; } = "";
-        public int SshPort { get; set; }
-        public int ExecutorPort { get; set; }
-        public int RemotePort { get; set; }
-        public int GatewayLocalPort { get; set; } = 18889;
-        public string KnownHostsFile { get; set; } = "";
-        public string IdentityFile { get; set; } = "";
-        public string HostKeyFingerprint { get; set; } = "";
-        public void Validate()
-        {
-            if (Version != 1 || !Regex.IsMatch(BoxHost, @"^[A-Za-z0-9][A-Za-z0-9.-]*$") || !Regex.IsMatch(SshUser, @"^[a-z_][a-z0-9_-]*$") ||
-                SshPort is < 1 or > 65535 || ExecutorPort is < 1024 or > 65535 || RemotePort is < 1024 or > 65535 ||
-                GatewayLocalPort is < 1024 or > 65535 || GatewayLocalPort == ExecutorPort ||
-                !Path.IsPathFullyQualified(KnownHostsFile) || !Path.IsPathFullyQualified(IdentityFile) || !File.Exists(KnownHostsFile) || !File.Exists(IdentityFile) ||
-                !Regex.IsMatch(HostKeyFingerprint, @"^SHA256:[A-Za-z0-9+/]{43}$"))
-                throw new InvalidOperationException("盒子配对配置不完整，见设置中的运行指南。");
-        }
     }
 }

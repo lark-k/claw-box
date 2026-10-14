@@ -129,6 +129,7 @@ public static class VisualSmoke
         user.Text = "请归纳工作区中的项目结构、各目录用途、入口文件和测试方式，并区分源码、说明文档与生成文件。还要说明哪些文件是运行时入口、哪些文件用于测试，以及当前项目的构建方式；请保留原文件，不要修改工作区内容。";
         window.Width = 1200; window.Height = 800; Capture("bubble-wrap.png");
         SidebarSmoke.Run(window, model, temporary, destination, Capture);
+        ConnectionSetupSmoke.Run(destination);
         window.Close();
         static void Pump(TimeSpan duration)
         {
