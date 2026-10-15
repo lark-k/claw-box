@@ -48,6 +48,8 @@ public sealed class ConnectionSetupWindow : Window
     private readonly Dictionary<string, Button> repairButtons = [];
     private bool busy, diagnosing, closed, closePending;
     private bool localReady, networkReady;
+    private bool networkChecksEnabled;
+    private bool loginVerified, diagnoseAgain;
     private string failedStep = "";
     public ConnectionSetupWindow(DesktopSettings settings, Func<CancellationToken, Task<string?>> connect, bool preview = false, Action? saveConfiguration = null)
     {
@@ -60,7 +62,7 @@ public sealed class ConnectionSetupWindow : Window
         DockPanel root = new(); Content = new Border { Background = Brushes.White, Padding = new Thickness(28), Child = root };
         StackPanel heading = new(); DockPanel.SetDock(heading, Dock.Top); root.Children.Add(heading);
         heading.Children.Add(new TextBlock { Text = preview ? "连接你的板子 · 界面预览" : "连接你的板子", FontSize = 27, FontWeight = FontWeights.SemiBold });
-        heading.Children.Add(new TextBlock { Text = "板子接电并用网线连电脑，电脑先连 Wi-Fi 或热点。按右侧提示调整网络，再完成首次配对。", TextWrapping = TextWrapping.Wrap, Foreground = Brushes.Gray, Margin = new Thickness(0, 8, 0, 20) });
+        heading.Children.Add(new TextBlock { Text = "板子接电并用网线连电脑，电脑先连 Wi-Fi 或热点。填写地址、端口和密码并确认设备后，按顺序检查连接。", TextWrapping = TextWrapping.Wrap, Foreground = Brushes.Gray, Margin = new Thickness(0, 8, 0, 20) });
         StackPanel footer = new(); DockPanel.SetDock(footer, Dock.Bottom); root.Children.Add(footer);
         footer.Children.Add(summary);
         WrapPanel actions = new() { HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 15, 0, 0) };
@@ -121,19 +123,19 @@ public sealed class ConnectionSetupWindow : Window
         }
         foreach (TextBox input in new[] { host, port }) input.TextChanged += (_, _) => { consent.IsChecked = false; InputsChanged(); };
         password.PasswordChanged += (_, _) => InputsChanged();
-        consent.Checked += (_, _) => { UpdateActions(); ScheduleAutoCheck(); };
-        consent.Unchecked += (_, _) => { autoGate.Invalidate(); autoCancellation?.Cancel(); UpdateActions(); };
-        foreach (Control input in new Control[] { host, port, password }) input.LostKeyboardFocus += (_, _) => { _ = Diagnose(); ScheduleAutoCheck(); };
+        consent.Checked += (_, _) => BeginChecks();
+        consent.Unchecked += (_, _) => InputsChanged();
+        foreach (Control input in new Control[] { host, port, password }) input.LostKeyboardFocus += (_, _) => Dispatcher.BeginInvoke(BeginChecks);
         autoTimer.Tick += async (_, _) => { autoTimer.Stop(); await AutoCheck(); };
         inspect.Click += async (_, _) => await Run(false);
         provision.Click += async (_, _) => await Run(true);
         reconnect.Click += async (_, _) => await Reconnect();
         cancel.Click += (_, _) => { if (busy) { operation?.Cancel(); summary.Text = "正在停止。已经完成的配对步骤会保留，不会自动继续配置。"; } else if (autoChecking) { autoCancellation?.Cancel(); summary.Text = "正在停止自动检查。"; } else Close(); };
-        timer.Tick += async (_, _) => await Diagnose();
-        Loaded += async (_, _) => { if (!preview) { timer.Start(); await Diagnose(); } };
+        timer.Tick += async (_, _) => { if (networkRetryAllowed && loginVerified && !autoChecking) RetryNetworkCheck(); await Diagnose(); };
+        Loaded += async (_, _) => { if (!preview) { NetworkChange.NetworkAddressChanged += NetworkChanged; timer.Start(); await Diagnose(); } };
         Activated += (_, _) => { if (retryOnActivation) { retryOnActivation = false; RetryNetworkCheck(); _ = Diagnose(); } };
         Closing += OnClosing;
-        Closed += (_, _) => { closed = true; timer.Stop(); autoTimer.Stop(); autoCancellation?.Cancel(); lifetime.Cancel(); password.Clear(); lifetime.Dispose(); };
+        Closed += (_, _) => { closed = true; NetworkChange.NetworkAddressChanged -= NetworkChanged; timer.Stop(); autoTimer.Stop(); autoCancellation?.Cancel(); lifetime.Cancel(); password.Clear(); lifetime.Dispose(); };
         InputsChanged();
     }
     private void LoadExisting()
@@ -157,37 +159,51 @@ public sealed class ConnectionSetupWindow : Window
         if (busy) return;
         autoGate.Invalidate(); autoCancellation?.Cancel(); autoTimer.Stop();
         networkRetryAllowed = false;
+        loginVerified = false;
+        networkChecksEnabled = false;
         connectionReady = false;
         if (!autoChecking) cancel.Content = "关闭";
         boardReady = false;
         networkReady = false;
-        Apply(new("identity", "missing", password.Password.Length == 0 ? "首次绑定需要登录密码；已有配对可直接连接，换网络后只需更新地址。" : "勾选配对确认后，输入完成将自动检查设备登录。"));
+        foreach (string step in new[] { "subnet", "network", "identity", "internet" })
+            Apply(new(step, "waiting", "填写密码并确认设备后开始检查；已有配对可直接连接。"));
         Apply(new("board", "waiting", "填写完成后自动检查，缺少运行条件时显示处理办法。"));
         Apply(new("boardIp", "waiting", "登录后读取持久网络配置，确认板子是否固定 IP。"));
         Apply(new("deploy", "waiting", "勾选绑定说明并点击“绑定并连接”才会修改板子配置。"));
         Apply(new("verify", "waiting", "实际连接通过后才会显示验收成功，不会发送模型任务。"));
-        failedStep = ""; summary.Text = "输入完成后自动检查；电脑组件和网络每 3 秒复查。绑定和网卡设置由你点击执行。";
+        failedStep = ""; summary.Text = "先填写密码并确认设备，再检查网络和板子；开始后每 3 秒复查网络。已有配对可留空密码直接连接。";
         UpdateActions();
+    }
+    private void BeginChecks()
+    {
+        if (closed || busy || host.IsKeyboardFocusWithin || port.IsKeyboardFocusWithin || password.IsKeyboardFocusWithin ||
+            password.Password.Length == 0 || consent.IsChecked != true) return;
+        networkChecksEnabled = true;
+        _ = Diagnose();
+        ScheduleAutoCheck();
     }
     private async Task Diagnose()
     {
-        if (isPreview || busy || diagnosing || closed) return;
+        if (isPreview || busy || closed) return;
+        if (diagnosing) { diagnoseAgain = true; return; }
         diagnosing = true;
         string address = host.Text.Trim(); string portText = port.Text;
+        int version = autoGate.Version;
+        bool includeNetwork = networkChecksEnabled;
         try
         {
-            SetupUpdate[] checks = await BoardSetup.Diagnose(address, int.TryParse(portText, out int number) ? number : 0, lifetime.Token);
-            if (closed || busy || host.Text.Trim() != address || port.Text != portText) return;
+            SetupUpdate[] checks = await BoardSetup.Diagnose(address, int.TryParse(portText, out int number) ? number : 0, lifetime.Token, includeNetwork);
+            if (closed || busy || version != autoGate.Version || host.Text.Trim() != address || port.Text != portText) return;
             foreach (SetupUpdate check in checks) Apply(check);
-            Apply(NetworkSetup.Diagnose(address, NetworkSetup.ReadAdapters()));
+            if (includeNetwork) Apply(NetworkSetup.Diagnose(address, NetworkSetup.ReadAdapters()));
             localReady = checks.Any(c => c.Step == "local" && c.Status == "ready");
             networkReady = checks.Any(c => c.Step == "network" && c.Status == "ready");
             UpdateActions();
             if (networkReady && !host.IsKeyboardFocusWithin && !port.IsKeyboardFocusWithin && !password.IsKeyboardFocusWithin) ScheduleAutoCheck();
         }
         catch (OperationCanceledException) { }
-        catch (NetworkInformationException) { Apply(new("subnet", "missing", "无法读取网卡状态。点击“设置以太网 IP”或 Windows 以太网设置检查。")); }
-        finally { diagnosing = false; }
+        catch (NetworkInformationException) { if (includeNetwork && version == autoGate.Version) Apply(new("subnet", "missing", "无法读取网卡状态。点击“设置以太网 IP”或 Windows 以太网设置检查。")); }
+        finally { diagnosing = false; if (diagnoseAgain && !closed) { diagnoseAgain = false; _ = Diagnose(); } }
     }
     private async Task<SetupRequest> Request(CancellationToken cancellation)
     {
@@ -323,6 +339,7 @@ public sealed class ConnectionSetupWindow : Window
         row.Status.Foreground = update.Status switch { "ready" => Brushes.ForestGreen, "missing" => Brushes.DarkOrange, "checking" => Brushes.RoyalBlue, _ => Brushes.Gray };
         row.Detail.Text = update.Detail;
         if (update.Step == "internet") networkRetryAllowed = update.Status == "missing";
+        if (update.Step == "identity") loginVerified = update.Status == "ready";
         if (repairButtons.TryGetValue(update.Step, out Button? repair)) repair.Visibility = update.Status == "missing" ? Visibility.Visible : Visibility.Collapsed;
         if (update.Status == "checking") failedStep = update.Step;
         if (busy && update.Step is "board" or "boardIp" or "deploy" or "verify")
@@ -359,7 +376,15 @@ public sealed class ConnectionSetupWindow : Window
     }
     private void RetryNetworkCheck()
     {
-        if (networkRetryAllowed) { autoGate.RetryAfterNetworkSettings(); autoCancellation?.Cancel(); ScheduleAutoCheck(); }
+        if (closed || busy || !networkChecksEnabled) return;
+        autoGate.RetryAfterNetworkSettings(); autoCancellation?.Cancel();
+        Apply(new("subnet", "checking", "正在刷新 IPv4 配置…"));
+        if (networkRetryAllowed && loginVerified) Apply(new("internet", "checking", "正在重新检查板子的模型网络…"));
+        _ = Diagnose(); ScheduleAutoCheck();
+    }
+    private void NetworkChanged(object? sender, EventArgs args)
+    {
+        if (!closed) Dispatcher.BeginInvoke(() => { if (!closed) RetryNetworkCheck(); });
     }
     private void OpenSettings(string uri)
     {

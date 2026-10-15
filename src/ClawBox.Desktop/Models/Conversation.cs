@@ -54,6 +54,7 @@ public sealed class Conversation : Observable
     public string Title { get => title; set => Set(ref title, value); }
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.Now;
     public List<Message> Messages { get; set; } = [];
+    [JsonIgnore] public bool HistoryUnavailable { get; set; }
 }
 
 public sealed class DesktopSettings

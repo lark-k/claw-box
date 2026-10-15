@@ -11,16 +11,20 @@ namespace ClawBox.Desktop.Services;
 public sealed class RuntimeSession : IDisposable
 {
     private readonly List<Process> owned = [];
+    private readonly Dictionary<Process, (RuntimeStartupDiagnostics Diagnostics, Task Drained)> diagnostics = [];
     private OwnedProcessJob? job;
+    private BoardConnectionProfile? profile;
+    private SshTunnel? tunnel;
     public ExecutorClient? Executor { get; private set; }
     public GatewayClient? Gateway { get; private set; }
-    public bool Alive => owned.Count == 2 && owned.All(p => !p.HasExited);
-    public async Task Start(DesktopSettings settings, CancellationToken cancellation)
+    public bool Alive => owned.Count == 1 && owned.All(p => !p.HasExited) && tunnel?.Alive == true;
+    public async Task Start(DesktopSettings settings, CancellationToken cancellation, Action<string>? progress = null)
     {
         Dispose();
         try
         {
             BoardConnectionProfile profile = BoardConnectionProfile.Load(settings.ProfilePath);
+            this.profile = profile;
             using JsonDocument gatewaySecret = JsonDocument.Parse(ConnectionFiles.Read(settings.GatewayTokenFile, "网关凭据文件"));
             string gatewayToken = Secret(gatewaySecret.RootElement, "token");
             if (gatewayToken.Length < 32 || gatewayToken.Any(char.IsControl)) throw new InvalidOperationException("网关凭据无效。");
@@ -58,14 +62,18 @@ public sealed class RuntimeSession : IDisposable
             Launch(executor);
             using HttpClient health = CreateHealthClient();
             await Ready(health, $"http://127.0.0.1:{profile.ExecutorPort}/healthz", cancellation);
-            Launch(Hidden("ssh.exe", "-N", "-T", "-p", profile.SshPort.ToString(), "-i", profile.IdentityFile,
-                "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes", "-o", "UserKnownHostsFile=" + profile.KnownHostsFile,
-                "-o", "StrictHostKeyChecking=yes", "-o", "HostKeyAlgorithms=ssh-ed25519", "-o", "ExitOnForwardFailure=yes",
-                "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3", "-o", "ConnectTimeout=10",
-                "-R", $"127.0.0.1:{profile.RemotePort}:127.0.0.1:{profile.ExecutorPort}",
-                "-L", $"127.0.0.1:{profile.GatewayLocalPort}:127.0.0.1:18789", $"{profile.SshUser}@{profile.BoxHost}"));
             health.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", gatewayToken);
-            await Ready(health, $"http://127.0.0.1:{profile.GatewayLocalPort}/v1/models", cancellation);
+            await SshStartupRecovery.Run(async () =>
+            {
+                EnsurePortAvailable(profile.GatewayLocalPort);
+                SshTunnel attempt = new(profile); tunnel = attempt;
+                try
+                {
+                    await attempt.Connect(cancellation);
+                    await Ready(health, $"http://127.0.0.1:{profile.GatewayLocalPort}/v1/models", cancellation, requireForwarding: true);
+                }
+                catch { attempt.Dispose(); if (ReferenceEquals(tunnel, attempt)) tunnel = null; throw; }
+            }, cancellation, retrying: () => progress?.Invoke($"板子端转发端口 {profile.RemotePort} 暂不可用，正在等待并重试连接…"));
             Executor = new(admin, worker, profile.ExecutorPort);
             Gateway = new(gatewayToken, profile.GatewayLocalPort);
         }
@@ -80,24 +88,42 @@ public sealed class RuntimeSession : IDisposable
         return token;
     }
     public static HttpClient CreateHealthClient() => new(new SocketsHttpHandler { UseProxy = false, AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(2) };
-    private async Task Ready(HttpClient client, string url, CancellationToken cancellation)
+    private async Task Ready(HttpClient client, string url, CancellationToken cancellation, bool requireForwarding = false)
     {
         for (int i = 0; i < 30; i++)
         {
-            if (owned.Any(p => p.HasExited)) throw new InvalidOperationException("后台连接启动失败。请检查端口占用、配对密钥或盒子网关配置。");
+            await CheckProcesses(cancellation);
             try
             {
                 using HttpResponseMessage response = await client.GetAsync(url, cancellation);
-                if (response.IsSuccessStatusCode) return;
+                if (response.IsSuccessStatusCode)
+                {
+                    await CheckProcesses(cancellation);
+                    if (!requireForwarding || tunnel?.Alive == true) return;
+                }
                 if ((int)response.StatusCode == 401) throw new InvalidOperationException("盒子网关凭据无效，请更新配置。");
             }
             catch (HttpRequestException) { }
             catch (TaskCanceledException) when (!cancellation.IsCancellationRequested) { }
             await Task.Delay(300, cancellation);
         }
-        throw new InvalidOperationException("连接盒子超时。请检查电源、网线、网络共享和网关服务。");
+        await CheckProcesses(cancellation);
+        throw new InvalidOperationException("连接检查超时。请检查板子电源、网线、重启后的网络共享和网关服务；无需重新绑定。");
     }
-    private void Launch(ProcessStartInfo info)
+    private async Task CheckProcesses(CancellationToken cancellation)
+    {
+        cancellation.ThrowIfCancellationRequested();
+        foreach (Process process in owned.Where(p => p.HasExited))
+        {
+            var output = diagnostics[process];
+            // A child may inherit redirected handles; never wait indefinitely for EOF.
+            try { await output.Drained.WaitAsync(TimeSpan.FromSeconds(1), cancellation); }
+            catch (TimeoutException) { }
+            cancellation.ThrowIfCancellationRequested();
+            throw output.Diagnostics.Error(profile!.ExecutorPort, profile.GatewayLocalPort, profile.RemotePort);
+        }
+    }
+    private Process Launch(ProcessStartInfo info)
     {
         job ??= new OwnedProcessJob();
         Process process = Process.Start(info) ?? throw new InvalidOperationException("后台服务启动失败。");
@@ -109,9 +135,9 @@ public sealed class RuntimeSession : IDisposable
             throw;
         }
         owned.Add(process);
-        // Drain output without recording credentials, documents or arbitrary process diagnostics.
-        _ = Drain(process.StandardOutput);
-        _ = Drain(process.StandardError);
+        RuntimeStartupDiagnostics output = new(owned.Count == 2);
+        diagnostics.Add(process, (output, Task.WhenAll(output.Drain(process.StandardOutput), output.Drain(process.StandardError))));
+        return process;
     }
     internal static void EnsurePortAvailable(int port)
     {
@@ -120,11 +146,11 @@ public sealed class RuntimeSession : IDisposable
         catch (SocketException error)
         { throw new InvalidOperationException($"本地端口 {port} 无法使用，可能被旧版 APP、手动执行器或其他程序占用。请关闭对应程序后点击“使用已有配对连接”；无需重新绑定板子。", error); }
     }
-    private static async Task Drain(StreamReader stream)
+    private void Stop(Process process)
     {
-        char[] buffer = new char[2048];
-        try { while (await stream.ReadAsync(buffer) != 0) { } }
-        catch (Exception error) when (error is IOException or ObjectDisposedException) { }
+        try { if (!process.HasExited) { process.Kill(entireProcessTree: true); process.WaitForExit(3000); } }
+        catch (InvalidOperationException) { }
+        finally { owned.Remove(process); diagnostics.Remove(process); process.Dispose(); }
     }
     private static ProcessStartInfo Hidden(string executable, params string[] arguments)
     {
@@ -152,13 +178,9 @@ public sealed class RuntimeSession : IDisposable
     public void Dispose()
     {
         Gateway?.Dispose(); Executor?.Dispose(); Gateway = null; Executor = null;
+        tunnel?.Dispose(); tunnel = null;
         job?.Dispose(); job = null;
-        foreach (Process process in owned.AsEnumerable().Reverse())
-        {
-            try { if (!process.HasExited) { process.Kill(entireProcessTree: true); process.WaitForExit(3000); } }
-            catch (InvalidOperationException) { }
-            finally { process.Dispose(); }
-        }
-        owned.Clear();
+        foreach (Process process in owned.AsEnumerable().Reverse().ToArray()) Stop(process);
+        profile = null;
     }
 }

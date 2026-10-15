@@ -21,6 +21,10 @@ public sealed class ShellViewModel : Observable, IDisposable
     private readonly Dictionary<string, FileChanges.Snapshot> originals = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, ProjectGroup> projectGroups = new(StringComparer.OrdinalIgnoreCase);
     private readonly RuntimeSession runtime = new();
+    private CancellationTokenSource? connecting;
+    public bool IsConnecting => connecting is not null;
+    public string ConnectionButtonLabel => IsConnecting ? "停止连接" : "连接盒子";
+    public void CancelConnection() => connecting?.Cancel();
     private readonly DispatcherTimer timer;
     private CancellationTokenSource? turn;
     private bool userStopped;
@@ -52,7 +56,7 @@ public sealed class ShellViewModel : Observable, IDisposable
     public bool Connected { get => connected; private set => Set(ref connected, value); }
     public bool Busy { get => busy; private set { Set(ref busy, value); Changed(nameof(CanSend)); Changed(nameof(CanManageChats)); Changed(nameof(IsResponding)); } }
     public bool IsResponding => Busy && turn is not null;
-    public bool CanSend => Connected && !Busy && Approvals.Count == 0;
+    public bool CanSend => Connected && !Busy && Approvals.Count == 0 && !Selected.HistoryUnavailable;
     public bool CanManageChats => !Busy && Approvals.Count == 0 && !Tasks.Any(t => t.IsRunning);
     public string Input { get => input; set { Set(ref input, value); Changed(nameof(ContextInfo)); } }
     public string Search { get => search; set { Set(ref search, value); SidebarChanged(); } }
@@ -73,7 +77,7 @@ public sealed class ShellViewModel : Observable, IDisposable
             Attachments.Clear();
             Changes.Clear();
             foreach (FileChange change in selected.Messages.LastOrDefault(m => m.Role == "assistant")?.Changes ?? []) Changes.Add(change);
-            Changed(); Changed(nameof(Title)); Changed(nameof(WorkspacePath)); Changed(nameof(ContextInfo));
+            Changed(); Changed(nameof(Title)); Changed(nameof(WorkspacePath)); Changed(nameof(ContextInfo)); Changed(nameof(CanSend));
             if (reconnect) _ = Connect();
         }
     }
@@ -89,6 +93,7 @@ public sealed class ShellViewModel : Observable, IDisposable
         foreach (Conversation conversation in Conversations.Where(c => c.WorkspacePath.Length == 0))
         {
             conversation.WorkspacePath = Settings.Workspace;
+            if (conversation.HistoryUnavailable) continue;
             conversation.IsProject = !Settings.Workspace.Equals(new DesktopSettings().Workspace, StringComparison.OrdinalIgnoreCase);
             if (conversation.IsProject && !Settings.Projects.Contains(Settings.Workspace, StringComparer.OrdinalIgnoreCase)) Settings.Projects.Add(Settings.Workspace);
             conversation.CreatedAt = conversation.Messages.FirstOrDefault()?.At ?? conversation.UpdatedAt;
@@ -161,6 +166,7 @@ public sealed class ShellViewModel : Observable, IDisposable
     public void RenameConversation(Conversation conversation, string title)
     {
         if (!CanManageChats) { Status = "请先结束当前任务并处理待审批请求。"; return; }
+        if (conversation.HistoryUnavailable) { Status = "损坏的原记录已保留，请新建对话继续使用。"; return; }
         if (!Conversations.Contains(conversation)) return;
         title = title.Trim();
         if (title.Length is 0 or > 120 || title.Any(char.IsControl)) throw new ArgumentException("会话名称应为 1 至 120 个字符，不能包含换行。", nameof(title));
@@ -190,19 +196,21 @@ public sealed class ShellViewModel : Observable, IDisposable
     public async Task Connect(CancellationToken cancellation = default)
     {
         if (Busy) return;
+        using CancellationTokenSource attempt = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+        connecting = attempt; Changed(nameof(IsConnecting)); Changed(nameof(ConnectionButtonLabel));
         Settings.AccessMode = "approval"; Changed(nameof(AccessLabel)); automatic.Reset();
         Busy = true; Connected = false; timer.Stop();
         Status = "正在连接盒子…";
         try
         {
-            await runtime.Start(Settings, cancellation);
+            await runtime.Start(Settings, attempt.Token, message => Status = message);
             Connected = true; Status = "盒子已连接"; timer.Start();
             Changed(nameof(CanSend));
         }
         catch (Exception error) when (error is IOException or InvalidOperationException or JsonException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
         { Status = error.Message; }
         catch (OperationCanceledException) { Status = "连接已停止，请检查网络后重试。"; }
-        finally { Busy = false; }
+        finally { connecting = null; Changed(nameof(IsConnecting)); Changed(nameof(ConnectionButtonLabel)); Busy = false; }
     }
     public async Task Send()
     {
@@ -362,7 +370,7 @@ public sealed class ShellViewModel : Observable, IDisposable
             Attachments.Add(target);
         }
     }
-    public void Dispose() { timer.Stop(); turn?.Cancel(); runtime.Dispose(); }
+    public void Dispose() { timer.Stop(); connecting?.Cancel(); turn?.Cancel(); runtime.Dispose(); }
 }
 
 public sealed class ApprovalCard(ToolRequest request) : Observable

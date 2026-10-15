@@ -109,7 +109,7 @@ public sealed class SshBoardSetupTransport : IBoardSetupTransport
         {
             await Task.Run(() =>
             {
-                foreach (string name in new[] { "pair-desktop.py", "install-plugin.py", "configure-desktop.py", "package.json", "openclaw.plugin.json", "index.js", "client.js" })
+                foreach (string name in new[] { "pair-desktop.py", "recover-tunnel.py", "install-plugin.py", "configure-desktop.py", "package.json", "openclaw.plugin.json", "index.js", "client.js" })
                 {
                     cancellation.ThrowIfCancellationRequested();
                     using MemoryStream file = new(Asset(name));
@@ -137,6 +137,17 @@ public sealed class SshBoardSetupTransport : IBoardSetupTransport
         progress.Report(new("deploy", "checking", reload ? "必要配置已更新，正在重启板子网关…" : "已有插件和聊天配置已复用，跳过重装与重启。正在检查网关服务…"));
         string service = reload ? "systemctl --user restart openclaw-gateway.service" : "systemctl --user is-active --quiet openclaw-gateway.service || systemctl --user start openclaw-gateway.service";
         await Execute("bash -lc 'export XDG_RUNTIME_DIR=/run/user/0 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/0/bus; " + service + "'", "deploy", "板子网关服务未启动。请让管理员检查服务日志；已有配置保留，重试不会重装匹配的插件。", cancellation);
+        progress.Report(new("deploy", "checking", "正在检查旧连接，仅回收已确认断开的本机隧道…"));
+        System.Net.IPAddress[] addresses = await System.Net.Dns.GetHostAddressesAsync(request!.Host, cancellation);
+        int[] ports = System.Net.NetworkInformation.IPGlobalProperties.GetIPGlobalProperties().GetActiveTcpConnections()
+            .Where(t => t.State == System.Net.NetworkInformation.TcpState.Established && t.RemoteEndPoint.Port == request.Port && addresses.Contains(t.RemoteEndPoint.Address))
+            .Select(t => t.LocalEndPoint.Port).Distinct().ToArray();
+        using (SftpClient sftp = await OpenSftp(cancellation))
+        using (MemoryStream data = new(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { at = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), sshPort = request.Port, ports }))))
+            sftp.UploadFile(data, stage + "/active-ports.json");
+        string recovery = await Execute($"python3 {stage}/recover-tunnel.py {stage}/active-ports.json", "verify", "旧连接无法安全核验，未终止占用者。请关闭其他电脑的连接后重试。", cancellation);
+        if (!recovery.Contains("CLAWBOX_RECOVERY=free", StringComparison.Ordinal) && !recovery.Contains("CLAWBOX_RECOVERY=released", StringComparison.Ordinal))
+            throw new SetupException("verify", "板子端已有连接，尚不能证明它已失效，软件未终止占用者。请关闭其他电脑的 APP 后使用已有配对连接。");
     }
     private static string Outcome(string result)
     {

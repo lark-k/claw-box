@@ -33,6 +33,8 @@ public partial class App : Application
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidOperationException)
         { MessageBox.Show(error.Message, "Quantum Harness"); Shutdown(); }
+        catch (System.Text.Json.JsonException)
+        { MessageBox.Show("本地记录格式损坏，原文件已保留。请检查用户数据目录。", "Quantum Harness"); Shutdown(); }
     }
     protected override void OnExit(ExitEventArgs e) { singleInstance?.Dispose(); base.OnExit(e); }
 }

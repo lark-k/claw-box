@@ -13,22 +13,47 @@ public sealed class ConversationStore(LocalState state)
         CheckPath(Path.Combine(state.DirectoryPath, "conversations.json"));
         if (!File.Exists(Path.Combine(state.DirectoryPath, "chat-index.json")))
             return state.Load("conversations.json", () => new List<Conversation>());
-        return state.Load("chat-index.json", () => new List<Entry>()).Select(entry =>
+        return state.Load("chat-index.json", () => new List<Entry>()).Select(LoadEntry).ToList();
+    }
+    private Conversation LoadEntry(Entry entry)
+    {
+        string path = FilePath(entry.Id, entry.CreatedAt);
+        try { return Read(path, entry); }
+        catch (Exception error) when (error is JsonException or FileNotFoundException or DirectoryNotFoundException)
         {
-            Conversation conversation = JsonSerializer.Deserialize<Conversation>(File.ReadAllText(FilePath(entry.Id, entry.CreatedAt)), Json)
-                ?? throw new InvalidOperationException("对话记录格式损坏。原文件已保留。");
-            if (conversation.Id != entry.Id || conversation.CreatedAt != entry.CreatedAt) throw new InvalidOperationException("对话索引与记录不一致。原文件已保留。");
-            return conversation;
-        }).ToList();
+            string backup = path + ".bak"; CheckPath(backup);
+            try
+            {
+                Conversation recovered = Read(backup, entry);
+                recovered.Messages.Add(new() { Role = "system", Text = "本条对话已从上一份有效备份载入，最近部分内容可能缺失。原损坏文件保留；不会重新发送历史任务。" });
+                return recovered;
+            }
+            catch (Exception backupError) when (backupError is JsonException or FileNotFoundException or DirectoryNotFoundException) { }
+            return new()
+            {
+                Id = entry.Id,
+                CreatedAt = entry.CreatedAt,
+                UpdatedAt = entry.CreatedAt,
+                Title = "记录暂不可用",
+                HistoryUnavailable = true,
+                Messages = [new() { Role = "system", Text = "本条聊天记录损坏或丢失，暂无有效备份，内容尚未恢复。原文件和索引已保留，当前记录只读。请点击“新建对话”继续使用；不会重新发送历史任务。" }]
+            };
+        }
+    }
+    private static Conversation Read(string path, Entry entry)
+    {
+        Conversation conversation = JsonSerializer.Deserialize<Conversation>(File.ReadAllText(path), Json) ?? throw new JsonException();
+        if (conversation.Id != entry.Id || conversation.CreatedAt != entry.CreatedAt) throw new InvalidOperationException("对话索引与记录不一致。原文件已保留。");
+        if (conversation.Title is null || conversation.WorkspacePath is null || conversation.Messages is null ||
+            conversation.Messages.Any(message => message is null || message.Text is null || message.Activities is null || message.Changes is null || message.ProgressEntries is null))
+            throw new JsonException();
+        return conversation;
     }
     public void Save(Conversation conversation)
     {
+        if (conversation.HistoryUnavailable) return;
         string path = FilePath(conversation.Id, conversation.CreatedAt);
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        string stage = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
-        CheckPath(stage);
-        File.WriteAllText(stage, JsonSerializer.Serialize(conversation, Json));
-        File.Move(stage, path, true);
+        state.Save(Path.GetRelativePath(state.DirectoryPath, path), conversation);
     }
     public void SaveIndex(IEnumerable<Conversation> conversations)
     {
@@ -46,8 +71,10 @@ public sealed class ConversationStore(LocalState state)
     public void Delete(Conversation conversation)
     {
         string path = FilePath(conversation.Id, conversation.CreatedAt);
+        string backup = path + ".bak"; CheckPath(backup);
         // Only this application-owned transcript. Never use WorkspacePath as a delete target.
         if (File.Exists(path)) File.Delete(path);
+        if (File.Exists(backup)) File.Delete(backup);
     }
     public string FilePath(Guid id, DateTimeOffset createdAt)
     {

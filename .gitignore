@@ -9,6 +9,12 @@
 **/.vite/
 **/.cache/
 **/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/.venv/
+**/htmlcov/
+.coverage
+.coverage.*
 # Browser test recordings and generated project dependency staging/backups.
 **/.playwright-cli/
 **/.qh-dependencies-*/
@@ -33,6 +39,7 @@ appsettings.Local.json
 *.sqlite
 *.sqlite-*
 *.db
+*.db-*
 *.log
 # Native crash dumps and Windows diagnostic captures.
 *.dmp

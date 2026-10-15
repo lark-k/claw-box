@@ -34,7 +34,36 @@ public sealed class LocalState
     public void Save<T>(string name, T value)
     {
         string path = Path.Combine(DirectoryPath, name), stage = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
-        File.WriteAllText(stage, JsonSerializer.Serialize(value, Json));
-        File.Move(stage, path, overwrite: true);
+        string backup = path + ".bak";
+        CheckPath(path); CheckPath(stage); CheckPath(backup);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        try
+        {
+            using (FileStream stream = new(stage, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough))
+            {
+                JsonSerializer.Serialize(stream, value, Json);
+                stream.Flush(flushToDisk: true);
+            }
+            if (!File.Exists(path)) { File.Move(stage, path); return; }
+            bool valid;
+            try { using JsonDocument previous = JsonDocument.Parse(File.ReadAllText(path)); valid = true; }
+            catch (JsonException) { valid = false; }
+            if (valid) File.Replace(stage, path, backup);
+            else
+            {
+                // Never rotate corrupt bytes over the last valid backup.
+                string damaged = path + ".corrupt-" + Guid.NewGuid().ToString("N");
+                CheckPath(damaged); File.Copy(path, damaged);
+                File.Move(stage, path, overwrite: true);
+            }
+        }
+        finally { if (File.Exists(stage)) File.Delete(stage); }
+    }
+    private void CheckPath(string path)
+    {
+        string root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(DirectoryPath)) + Path.DirectorySeparatorChar;
+        if (!Path.GetFullPath(path).StartsWith(root, StringComparison.OrdinalIgnoreCase)) throw new IOException("本地记录路径超出应用目录。");
+        for (FileSystemInfo? item = new FileInfo(path); item is not null; item = item is FileInfo file ? file.Directory : ((DirectoryInfo)item).Parent)
+            if (item.Exists && (item.Attributes & FileAttributes.ReparsePoint) != 0) throw new IOException("本地记录路径含链接，操作已停止。");
     }
 }

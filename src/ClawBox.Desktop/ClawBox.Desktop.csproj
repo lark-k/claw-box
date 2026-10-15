@@ -6,7 +6,12 @@
     <AssemblyName>QuantumHarness</AssemblyName>
     <RootNamespace>ClawBox.Desktop</RootNamespace>
     <Product>Quantum Harness</Product>
+    <ApplicationIcon>Assets/QuantumHarness.ico</ApplicationIcon>
   </PropertyGroup>
+  <ItemGroup>
+    <Resource Include="Assets/QuantumHarness.ico" />
+    <Resource Include="Assets/QuantumHarness.png" />
+  </ItemGroup>
   <ItemGroup>
     <PackageReference Include="SSH.NET" />
     <ProjectReference Include="../ClawBox.Contracts/ClawBox.Contracts.csproj" />
@@ -15,6 +20,7 @@
     <EmbeddedResource Include="../../scripts/board/inspect-desktop.py" Link="SetupAssets/inspect-desktop.py" />
     <EmbeddedResource Include="../../scripts/board/inspect-network.py" Link="SetupAssets/inspect-network.py" />
     <EmbeddedResource Include="../../scripts/board/pair-desktop.py" Link="SetupAssets/pair-desktop.py" />
+    <EmbeddedResource Include="../../scripts/board/recover-tunnel.py" Link="SetupAssets/recover-tunnel.py" />
     <EmbeddedResource Include="../../scripts/board/install-plugin.py" Link="SetupAssets/install-plugin.py" />
     <EmbeddedResource Include="../../scripts/board/configure-desktop.py" Link="SetupAssets/configure-desktop.py" />
     <EmbeddedResource Include="../ClawBox.OpenClawPlugin/package.json" Link="SetupAssets/package.json" />

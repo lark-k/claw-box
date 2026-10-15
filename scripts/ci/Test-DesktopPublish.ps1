@@ -12,7 +12,7 @@ $process=Start-Process -FilePath (Join-Path $package 'QuantumHarness.exe') -Argu
 if (-not $process.WaitForExit(60000)) { $process.Kill(); throw 'Desktop visual smoke timed out.' }
 if ($process.ExitCode -ne 0) { throw 'Published desktop EXE failed.' }
 Add-Type -AssemblyName System.Drawing
-foreach ($name in @('chat.png','approval.png','compact.png','thinking-start.png','thinking-scan.png','thinking-progress.png','thinking-complete.png','thinking-review.png','bubble-wrap.png','inline-progress-expanded.png','inline-progress-collapsed.png','stream-whitespace.png','stream-next-line.png','stream-empty-progress.png','sidebar-idle.png','sidebar-hover.png','workspace-collapsed.png','sidebar-renamed.png','sidebar-deleted.png','sidebar-focus.png','send-stop.png','send-restored.png')) {
+foreach ($name in @('chat.png','approval.png','compact.png','thinking-start.png','thinking-scan.png','thinking-progress.png','thinking-complete.png','thinking-review.png','bubble-wrap.png','inline-progress-expanded.png','inline-progress-collapsed.png','stream-whitespace.png','stream-next-line.png','stream-empty-progress.png','sidebar-idle.png','sidebar-hover.png','workspace-collapsed.png','sidebar-renamed.png','sidebar-deleted.png','sidebar-focus.png','send-stop.png','send-restored.png','history-recovery.png','connection-busy.png','history-new-chat.png','history-partial-markdown.png')) {
     $bitmap=[Drawing.Bitmap]::new((Join-Path $destination $name))
     try {
         if ($bitmap.Width -lt 900 -or $bitmap.Height -lt 600 -or $bitmap.GetPixel(50,40).A -eq 0) { throw 'Invalid desktop rendering.' }
@@ -22,7 +22,7 @@ foreach ($name in @('conversation-menu.png','workspace-menu.png','access-menu.pn
     $bitmap=[Drawing.Bitmap]::new((Join-Path $destination $name))
     try { if ($bitmap.Width -lt 200 -or $bitmap.Height -lt 50) { throw 'Invalid popup rendering.' } } finally { $bitmap.Dispose() }
 }
-foreach ($name in @('connection-guide-missing.png','connection-guide-board.png','connection-guide-progress.png','connection-guide-ready.png','connection-guide-compact.png')) {
+foreach ($name in @('connection-guide-waiting.png','connection-guide-missing.png','connection-guide-board.png','connection-guide-progress.png','connection-guide-ready.png','connection-guide-compact.png')) {
     $bitmap=[Drawing.Bitmap]::new((Join-Path $destination $name))
     try { if ($bitmap.Width -lt 700 -or $bitmap.Height -lt 450) { throw 'Invalid connection guide rendering.' } } finally { $bitmap.Dispose() }
 }

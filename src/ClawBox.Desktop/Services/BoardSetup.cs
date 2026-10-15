@@ -87,11 +87,12 @@ public sealed class BoardSetup
         string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "OpenSSH", name);
         return File.Exists(path) ? path : null;
     }
-    public static async Task<SetupUpdate[]> Diagnose(string host, int port, CancellationToken cancellation)
+    public static async Task<SetupUpdate[]> Diagnose(string host, int port, CancellationToken cancellation, bool includeNetwork = true)
     {
         List<SetupUpdate> checks = [];
         bool tools = OpenSshTool("ssh.exe") is not null && OpenSshTool("ssh-keygen.exe") is not null;
         checks.Add(new("local", tools ? "ready" : "missing", tools ? "Windows 连接组件已安装。" : "缺少 Windows OpenSSH 客户端。打开 Windows 设置 → 系统 → 可选功能，添加 OpenSSH 客户端，然后返回本窗口。无需安装 SDK。"));
+        if (!includeNetwork) return checks.ToArray();
         if (!Regex.IsMatch(host, @"^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$") || port is < 1 or > 65535)
         {
             checks.Add(new("network", "missing", "请输入设备 IP / 主机名和有效端口。地址请查看交付卡或路由器设备列表。"));

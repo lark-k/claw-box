@@ -21,6 +21,7 @@ public static class ConnectionSetupSmoke
         foreach (string action in new[] { "设置以太网 IP", "安装连接组件", "设置网络共享" })
             if (!Descendants<Button>(window).Any(b => Equals(b.Content, action))) throw new InvalidOperationException("A direct network action is missing.");
         window.PreviewUpdate(new("local", "ready", "Windows 连接组件已安装。"));
+        Capture("connection-guide-waiting.png");
         Button component = Descendants<Button>(window).Single(b => Equals(b.Content, "安装连接组件"));
         if (component.Visibility != Visibility.Collapsed) throw new InvalidOperationException("Installed connection components must not prompt for installation.");
         window.PreviewUpdate(new("local", "missing", "请安装 OpenSSH 客户端连接组件。"));

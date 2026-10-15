@@ -9,6 +9,7 @@ namespace ClawBox.Desktop;
 // Render model text only; markdown never executes HTML, commands or navigation.
 public sealed class MarkdownText : TextBlock
 {
+    private static readonly Regex InlineMarkup = new(@"\*\*[^*]+\*\*|`[^`]+`", RegexOptions.NonBacktracking);
     public static readonly DependencyProperty MarkdownProperty = DependencyProperty.Register(nameof(Markdown), typeof(string), typeof(MarkdownText),
         new PropertyMetadata("", (owner, _) => ((MarkdownText)owner).Render()));
     public string Markdown { get => (string)GetValue(MarkdownProperty); set => SetValue(MarkdownProperty, value); }
@@ -16,7 +17,7 @@ public sealed class MarkdownText : TextBlock
     {
         Inlines.Clear();
         bool code = false;
-        foreach (string line in Markdown.Replace("\r\n", "\n").Split('\n'))
+        foreach (string line in (Markdown ?? "").Replace("\r\n", "\n").Split('\n'))
         {
             if (line.StartsWith("```", StringComparison.Ordinal)) { code = !code; Inlines.Add(new LineBreak()); continue; }
             if (code) { Inlines.Add(new Run(line) { FontFamily = new("Consolas"), Background = new SolidColorBrush(Color.FromRgb(245, 245, 246)) }); }
@@ -25,15 +26,24 @@ public sealed class MarkdownText : TextBlock
                 string text = Regex.Replace(line, @"^#{1,6}\s+", "");
                 text = Regex.Replace(text, @"^\s*[-*]\s+", "• ");
                 bool heading = line.StartsWith('#');
-                foreach (string piece in Regex.Split(text, @"(\*\*[^*]+\*\*|`[^`]+`)", RegexOptions.None, TimeSpan.FromMilliseconds(200)))
+                int cursor = 0;
+                foreach (Match match in InlineMarkup.Matches(text))
                 {
+                    AddPlain(text[cursor..match.Index]);
+                    string piece = match.Value;
                     Run run = new(piece);
-                    if (piece.StartsWith("**", StringComparison.Ordinal) && piece.EndsWith("**", StringComparison.Ordinal))
+                    if (piece.StartsWith("**", StringComparison.Ordinal))
                     { run.Text = piece[2..^2]; run.FontWeight = FontWeights.SemiBold; }
-                    else if (piece.StartsWith('`') && piece.EndsWith('`') && piece.Length > 1)
+                    else
                     { run.Text = piece[1..^1]; run.FontFamily = new("Consolas"); run.Background = new SolidColorBrush(Color.FromRgb(242, 242, 243)); }
                     if (heading) run.FontWeight = FontWeights.SemiBold;
                     Inlines.Add(run);
+                    cursor = match.Index + match.Length;
+                }
+                AddPlain(text[cursor..]);
+                void AddPlain(string value)
+                {
+                    if (value.Length > 0) Inlines.Add(new Run(value) { FontWeight = heading ? FontWeights.SemiBold : FontWeight });
                 }
             }
             Inlines.Add(new LineBreak());

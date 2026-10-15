@@ -19,7 +19,7 @@ public static class ConnectionCheck
             Task.Run(async () =>
             {
                 using RuntimeSession runtime = new();
-                using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(35));
+                using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(120));
                 await runtime.Start(settings, timeout.Token);
                 if (!runtime.Alive) throw new InvalidOperationException("后台连接未就绪。");
             }).GetAwaiter().GetResult();

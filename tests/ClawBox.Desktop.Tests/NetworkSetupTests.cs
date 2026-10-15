@@ -70,6 +70,18 @@ public sealed class NetworkSetupTests
     {
         Assert.False(NetworkSetup.EligibleWired("vEthernet (WSL)", "Microsoft Hyper-V Network Adapter"));
         Assert.False(NetworkSetup.EligibleWired("VPN", "TAP-Windows Adapter"));
+        Assert.False(NetworkSetup.EligibleWired("蓝牙网络连接", "Bluetooth Device (Personal Area Network)"));
+        Assert.False(NetworkSetup.EligibleWired("以太网-WFP Native MAC", "WFP Native MAC Layer LightWeight Filter"));
         Assert.True(NetworkSetup.EligibleWired("以太网", "Realtek USB GbE Family Controller"));
+    }
+    [Fact]
+    public void Applied_static_address_passes_and_apipa_reports_the_actual_address()
+    {
+        SetupUpdate ready = NetworkSetup.Diagnose("192.168.137.2", [Wired("192.168.137.1")]);
+        Assert.Equal("ready", ready.Status); Assert.Contains("192.168.137.1 / 255.255.255.0", ready.Detail);
+        SetupUpdate missing = NetworkSetup.Diagnose("192.168.137.2", [Wired("169.254.156.202", "255.255.0.0")]);
+        Assert.Equal("missing", missing.Status); Assert.Contains("169.254.156.202 / 255.255.0.0", missing.Detail);
+        SetupUpdate disconnected = NetworkSetup.Diagnose("192.168.137.2", [Wired("192.168.137.1", up: false)]);
+        Assert.Contains("已配置同网段", disconnected.Detail); Assert.Contains("无需重复修改 IP", disconnected.Detail);
     }
 }
