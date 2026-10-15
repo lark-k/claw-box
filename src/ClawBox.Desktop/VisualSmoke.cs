@@ -58,7 +58,9 @@ public static class VisualSmoke
         model.Approvals.Clear();
         typeof(ShellViewModel).GetProperty(nameof(ShellViewModel.Connected))!.SetValue(model, true);
         Capture("connected.png");
-        typeof(ShellViewModel).GetProperty(nameof(ShellViewModel.Connected))!.SetValue(model, false);
+        System.Windows.Controls.Button disconnect = Descendants<System.Windows.Controls.Button>(window).Single(b => Equals(b.Content, "断开连接"));
+        disconnect.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+        if (model.Connected || model.ConnectionButtonLabel != "连接盒子") throw new InvalidOperationException("Home disconnect did not reset live connection state.");
         window.Width = 1907; window.Height = 1146;
         foreach (System.Windows.Controls.Button button in Descendants<System.Windows.Controls.Button>(window).Where(b => Equals(b.ToolTip, "查看本轮文件变更")).ToArray())
             button.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));

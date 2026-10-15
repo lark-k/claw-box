@@ -22,7 +22,7 @@ foreach ($name in @('conversation-menu.png','workspace-menu.png','access-menu.pn
     $bitmap=[Drawing.Bitmap]::new((Join-Path $destination $name))
     try { if ($bitmap.Width -lt 200 -or $bitmap.Height -lt 50) { throw 'Invalid popup rendering.' } } finally { $bitmap.Dispose() }
 }
-foreach ($name in @('connection-guide-waiting.png','connection-guide-missing.png','connection-guide-board.png','connection-guide-progress.png','connection-guide-ready.png','connection-guide-compact.png')) {
+foreach ($name in @('connection-guide-waiting.png','connection-guide-missing.png','connection-guide-board.png','connection-guide-progress.png','connection-guide-ready.png','connection-guide-compact.png','connection-guide-connected.png','connection-guide-disconnected.png')) {
     $bitmap=[Drawing.Bitmap]::new((Join-Path $destination $name))
     try { if ($bitmap.Width -lt 700 -or $bitmap.Height -lt 450) { throw 'Invalid connection guide rendering.' } } finally { $bitmap.Dispose() }
 }

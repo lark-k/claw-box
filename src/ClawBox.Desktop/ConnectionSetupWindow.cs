@@ -9,6 +9,7 @@ using System.Windows.Media;
 using System.Windows.Threading;
 using ClawBox.Desktop.Models;
 using ClawBox.Desktop.Services;
+using ClawBox.Desktop.ViewModels;
 using Renci.SshNet.Common;
 
 namespace ClawBox.Desktop;
@@ -22,6 +23,10 @@ public sealed class ConnectionSetupWindow : Window
     private readonly Dictionary<string, SetupRequest> observed = [];
     private readonly Action? saveConfiguration;
     private readonly bool isPreview;
+    private readonly ShellViewModel? session;
+    private bool syncingSession;
+    private bool HasSessionState => session is not null && (session.HasConnectionAttempted || session.Connected || session.IsConnecting);
+    private bool ShowingSession => HasSessionState && (session!.Connected || session.IsConnecting || !networkChecksEnabled);
     private readonly DispatcherTimer timer = new() { Interval = TimeSpan.FromSeconds(3) };
     private readonly DispatcherTimer autoTimer = new() { Interval = TimeSpan.FromMilliseconds(450) };
     private readonly ConnectionCheckGate autoGate = new();
@@ -43,6 +48,7 @@ public sealed class ConnectionSetupWindow : Window
     private readonly Button reconnect = new() { Content = "使用已有配对连接" };
     private readonly Button cancel = new() { Content = "关闭" };
     private readonly TextBlock summary = new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 12, 0, 0) };
+    private readonly TextBlock introduction = new() { Text = "板子接电并用网线连电脑，电脑先连 Wi-Fi 或热点。填写地址、端口和密码并确认设备后，按顺序检查连接。", TextWrapping = TextWrapping.Wrap, Foreground = Brushes.Gray, Margin = new Thickness(0, 8, 0, 20) };
     private readonly StackPanel form = new();
     private readonly Dictionary<string, (TextBlock Status, TextBlock Detail)> rows = [];
     private readonly Dictionary<string, Button> repairButtons = [];
@@ -51,9 +57,9 @@ public sealed class ConnectionSetupWindow : Window
     private bool networkChecksEnabled;
     private bool loginVerified, diagnoseAgain;
     private string failedStep = "";
-    public ConnectionSetupWindow(DesktopSettings settings, Func<CancellationToken, Task<string?>> connect, bool preview = false, Action? saveConfiguration = null)
+    public ConnectionSetupWindow(DesktopSettings settings, Func<CancellationToken, Task<string?>> connect, bool preview = false, Action? saveConfiguration = null, ShellViewModel? session = null)
     {
-        this.settings = settings; this.connect = connect; this.saveConfiguration = saveConfiguration; isPreview = preview;
+        this.settings = settings; this.connect = connect; this.saveConfiguration = saveConfiguration; isPreview = preview; this.session = session;
         Title = "Quantum Harness · 连接引导"; Width = 890; Height = 790; MinWidth = 760; MinHeight = 580;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
         FontFamily = new("Microsoft YaHei UI"); FontSize = 14; Background = Brushes.White;
@@ -62,7 +68,7 @@ public sealed class ConnectionSetupWindow : Window
         DockPanel root = new(); Content = new Border { Background = Brushes.White, Padding = new Thickness(28), Child = root };
         StackPanel heading = new(); DockPanel.SetDock(heading, Dock.Top); root.Children.Add(heading);
         heading.Children.Add(new TextBlock { Text = preview ? "连接你的板子 · 界面预览" : "连接你的板子", FontSize = 27, FontWeight = FontWeights.SemiBold });
-        heading.Children.Add(new TextBlock { Text = "板子接电并用网线连电脑，电脑先连 Wi-Fi 或热点。填写地址、端口和密码并确认设备后，按顺序检查连接。", TextWrapping = TextWrapping.Wrap, Foreground = Brushes.Gray, Margin = new Thickness(0, 8, 0, 20) });
+        heading.Children.Add(introduction);
         StackPanel footer = new(); DockPanel.SetDock(footer, Dock.Bottom); root.Children.Add(footer);
         footer.Children.Add(summary);
         WrapPanel actions = new() { HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 15, 0, 0) };
@@ -135,8 +141,63 @@ public sealed class ConnectionSetupWindow : Window
         Loaded += async (_, _) => { if (!preview) { NetworkChange.NetworkAddressChanged += NetworkChanged; timer.Start(); await Diagnose(); } };
         Activated += (_, _) => { if (retryOnActivation) { retryOnActivation = false; RetryNetworkCheck(); _ = Diagnose(); } };
         Closing += OnClosing;
-        Closed += (_, _) => { closed = true; NetworkChange.NetworkAddressChanged -= NetworkChanged; timer.Stop(); autoTimer.Stop(); autoCancellation?.Cancel(); lifetime.Cancel(); password.Clear(); lifetime.Dispose(); };
+        Closed += (_, _) => { closed = true; if (session is not null) session.PropertyChanged -= SessionChanged; NetworkChange.NetworkAddressChanged -= NetworkChanged; timer.Stop(); autoTimer.Stop(); autoCancellation?.Cancel(); lifetime.Cancel(); password.Clear(); lifetime.Dispose(); };
         InputsChanged();
+        if (session is not null) { session.PropertyChanged += SessionChanged; SyncSession(); }
+    }
+    private void SessionChanged(object? sender, PropertyChangedEventArgs args)
+    {
+        if (args.PropertyName is not (nameof(ShellViewModel.Connected) or nameof(ShellViewModel.IsConnecting) or nameof(ShellViewModel.Status))) return;
+        if (Dispatcher.CheckAccess()) SyncSession(); else Dispatcher.BeginInvoke(SyncSession);
+    }
+    private void SyncSession()
+    {
+        if (closed || busy || syncingSession || !HasSessionState) return;
+        syncingSession = true;
+        try
+        {
+            autoGate.Invalidate(); autoCancellation?.Cancel(); autoTimer.Stop();
+            networkChecksEnabled = false; networkRetryAllowed = false; loginVerified = false; boardReady = false;
+            connectionReady = session!.Connected;
+            bool active = session.Connected || session.IsConnecting;
+            host.IsEnabled = port.IsEnabled = password.IsEnabled = consent.IsEnabled = !active;
+            if (active && session.ConnectionDevice is SetupRequest device) { host.Text = device.Host; port.Text = device.Port.ToString(); }
+            if (session.Connected)
+            {
+                password.Clear(); consent.IsChecked = false;
+                introduction.Text = "板子已连接。当前地址、登录和聊天入口与首页同步，无需重复输入密码或绑定。";
+                Apply(new("local", "ready", "当前连接组件已建立加密隧道。"));
+                Apply(new("network", "ready", $"已连接板子 {host.Text}:{port.Text}，SSH 隧道正常。"));
+                Apply(new("identity", "ready", "已使用已有配对密钥登录，并核验原设备身份。无需再次输入密码。"));
+                Apply(session.RememberedCheck("boardIp") ?? new("boardIp", "unverified", "当前地址为 " + host.Text + "；已有配对未读取持久 IP 配置。"));
+                Apply(session.RememberedCheck("internet") ?? new("internet", "unverified", "聊天网关已连接；模型服务网络未单独检测，实际回答由聊天验证。"));
+                Apply(session.RememberedCheck("board") ?? new("board", "inUse", "板子网关已响应；未重新读取管理配置。"));
+                Apply(new("deploy", "inUse", "已使用原配对，本机执行器和工具转发已建立。"));
+                Apply(new("verify", "ready", "聊天入口已连接，与首页状态同步。"));
+                summary.Text = $"已连接 {host.Text}:{port.Text}。可返回对话，或点击“断开连接”；已有配对会保留。";
+            }
+            else
+            {
+                introduction.Text = session.IsConnecting ? "正在连接板子，进度与首页同步；可点击“停止连接”取消。" : "当前已断开。已有配对可直接重新连接；更换地址或修复配置时，填写密码并确认设备后检查。";
+                bool tools = BoardSetup.OpenSshTool("ssh.exe") is not null && BoardSetup.OpenSshTool("ssh-keygen.exe") is not null;
+                Apply(new("local", tools ? "ready" : "missing", tools ? "Windows 连接组件已安装。" : "请安装 Windows OpenSSH 客户端。"));
+                foreach (string step in new[] { "network", "identity", "internet", "board", "verify" })
+                    Apply(new(step, session.IsConnecting ? "checking" : "disconnected", session.IsConnecting ? "正在建立连接，结果与首页同步。" : "当前连接已断开；点击“使用已有配对连接”可重新连接。"));
+                Apply(new("boardIp", "unverified", "当前未连接；已有配对不包含持久 IP 配置，不能据此判断固定 IP。"));
+                bool saved = File.Exists(settings.ProfilePath) && File.Exists(settings.GatewayTokenFile);
+                Apply(new("deploy", saved ? "saved" : "unverified", saved ? "已有配对保留，无需重新绑定。" : "尚未保存可用配对。"));
+                summary.Text = session.Status;
+            }
+            if (!isPreview)
+            {
+                try { Apply(NetworkSetup.Diagnose(host.Text.Trim(), NetworkSetup.ReadAdapters())); }
+                catch (NetworkInformationException) { Apply(new("subnet", "unverified", "暂时无法读取网卡状态，请检查 Windows 以太网设置。")); }
+            }
+            else Apply(new("subnet", "unverified", "以太网配置由本机独立检查。"));
+            cancel.Content = session.Connected ? "返回对话" : "关闭";
+            UpdateActions();
+        }
+        finally { syncingSession = false; }
     }
     private void LoadExisting()
     {
@@ -156,7 +217,8 @@ public sealed class ConnectionSetupWindow : Window
     }
     private void InputsChanged()
     {
-        if (busy) return;
+        if (busy || closed || syncingSession) return;
+        if (HasSessionState) { SyncSession(); return; }
         autoGate.Invalidate(); autoCancellation?.Cancel(); autoTimer.Stop();
         networkRetryAllowed = false;
         loginVerified = false;
@@ -176,7 +238,7 @@ public sealed class ConnectionSetupWindow : Window
     }
     private void BeginChecks()
     {
-        if (closed || busy || host.IsKeyboardFocusWithin || port.IsKeyboardFocusWithin || password.IsKeyboardFocusWithin ||
+        if (closed || busy || session?.Connected == true || session?.IsConnecting == true || host.IsKeyboardFocusWithin || port.IsKeyboardFocusWithin || password.IsKeyboardFocusWithin ||
             password.Password.Length == 0 || consent.IsChecked != true) return;
         networkChecksEnabled = true;
         _ = Diagnose();
@@ -185,6 +247,7 @@ public sealed class ConnectionSetupWindow : Window
     private async Task Diagnose()
     {
         if (isPreview || busy || closed) return;
+        if (ShowingSession) { SyncSession(); return; }
         if (diagnosing) { diagnoseAgain = true; return; }
         diagnosing = true;
         string address = host.Text.Trim(); string portText = port.Text;
@@ -219,13 +282,14 @@ public sealed class ConnectionSetupWindow : Window
     }
     private async Task Run(bool bind)
     {
-        if (busy) return;
+        if (busy || session?.Connected == true || session?.IsConnecting == true) return;
+        networkChecksEnabled = true;
         string login = password.Password;
         await Execute(async cancellation =>
         {
             if (consent.IsChecked != true) throw new SetupException("identity", "请先阅读并勾选配对确认。检查不会更新插件；只有点击绑定才会进行配置。");
             SetupRequest request = await Request(cancellation);
-            IProgress<SetupUpdate> progress = new WindowProgress(this);
+            IProgress<SetupUpdate> progress = new WindowProgress(this, device: request);
             if (!bind)
             {
                 await setup.Inspect(request, login, progress, cancellation);
@@ -243,12 +307,12 @@ public sealed class ConnectionSetupWindow : Window
     }
     private void ScheduleAutoCheck()
     {
-        if (isPreview || closed || busy) return;
+        if (isPreview || closed || busy || session?.Connected == true || session?.IsConnecting == true) return;
         autoTimer.Stop(); autoTimer.Start();
     }
     private async Task AutoCheck()
     {
-        if (closed || busy || autoChecking) return;
+        if (closed || busy || autoChecking || session?.Connected == true || session?.IsConnecting == true) return;
         string target = host.Text.Trim(); int number = int.TryParse(port.Text, out int parsed) ? parsed : 0;
         string login = password.Password;
         if (!autoGate.TryStart(target, number, login, networkReady, consent.IsChecked == true)) return;
@@ -260,7 +324,7 @@ public sealed class ConnectionSetupWindow : Window
         {
             SetupRequest request = await Request(cancellation.Token);
             cancellation.Token.ThrowIfCancellationRequested();
-            IProgress<SetupUpdate> progress = new WindowProgress(this, version);
+            IProgress<SetupUpdate> progress = new WindowProgress(this, version, request);
             await setup.Inspect(request, login, progress, cancellation.Token);
             if (version == autoGate.Version && !closed)
             {
@@ -287,6 +351,8 @@ public sealed class ConnectionSetupWindow : Window
     }
     private async Task Reconnect()
     {
+        if (session?.IsConnecting == true) { session.CancelConnection(); return; }
+        if (session?.Connected == true) { session.Disconnect(); SyncSession(); return; }
         await Execute(async cancellation =>
         {
             Apply(new("identity", "checking", "正在核验新地址是否仍是原来的板子…"));
@@ -335,7 +401,7 @@ public sealed class ConnectionSetupWindow : Window
     private void Apply(SetupUpdate update)
     {
         if (closed || !rows.TryGetValue(update.Step, out var row)) return;
-        row.Status.Text = update.Status switch { "ready" => "✓ 已通过", "checking" => "正在检查…", "missing" => "需要处理", _ => "等待" };
+        row.Status.Text = update.Status switch { "ready" => "✓ 已通过", "checking" => "正在检查…", "missing" => "需要处理", "unverified" => "未核验", "inUse" => "使用中", "disconnected" => "已断开", "saved" => "已保存", _ => "等待" };
         row.Status.Foreground = update.Status switch { "ready" => Brushes.ForestGreen, "missing" => Brushes.DarkOrange, "checking" => Brushes.RoyalBlue, _ => Brushes.Gray };
         row.Detail.Text = update.Detail;
         if (update.Step == "internet") networkRetryAllowed = update.Status == "missing";
@@ -347,9 +413,11 @@ public sealed class ConnectionSetupWindow : Window
     }
     private void UpdateActions()
     {
-        inspect.IsEnabled = !busy && !autoChecking && networkReady && password.Password.Length > 0 && consent.IsChecked == true;
+        bool active = session?.Connected == true || session?.IsConnecting == true;
+        inspect.IsEnabled = !active && !busy && !autoChecking && networkReady && password.Password.Length > 0 && consent.IsChecked == true;
         provision.IsEnabled = inspect.IsEnabled && localReady && boardReady && !networkRetryAllowed && consent.IsChecked == true;
-        reconnect.IsEnabled = !busy && !autoChecking && File.Exists(settings.ProfilePath) && File.Exists(settings.GatewayTokenFile);
+        reconnect.Content = session?.Connected == true ? "断开连接" : session?.IsConnecting == true ? "停止连接" : "使用已有配对连接";
+        reconnect.IsEnabled = !busy && !autoChecking && (active || File.Exists(settings.ProfilePath) && File.Exists(settings.GatewayTokenFile));
     }
     private void OnClosing(object? sender, CancelEventArgs args)
     {
@@ -376,6 +444,7 @@ public sealed class ConnectionSetupWindow : Window
     }
     private void RetryNetworkCheck()
     {
+        if (ShowingSession) { SyncSession(); return; }
         if (closed || busy || !networkChecksEnabled) return;
         autoGate.RetryAfterNetworkSettings(); autoCancellation?.Cancel();
         Apply(new("subnet", "checking", "正在刷新 IPv4 配置…"));
@@ -397,11 +466,16 @@ public sealed class ConnectionSetupWindow : Window
         button.Click += (_, _) => { if (!isPreview) action(); }; panel.Children.Add(button);
         return button;
     }
-    private sealed class WindowProgress(ConnectionSetupWindow window, int? version = null) : IProgress<SetupUpdate>
+    private sealed class WindowProgress(ConnectionSetupWindow window, int? version = null, SetupRequest? device = null) : IProgress<SetupUpdate>
     {
         public void Report(SetupUpdate update)
         {
-            void Apply() { if (version is null || version == window.autoGate.Version) window.Apply(update); }
+            void Apply()
+            {
+                if (window.closed || version is not null && version != window.autoGate.Version) return;
+                if (device is not null) window.session?.RememberCheck(device, update);
+                window.Apply(update);
+            }
             if (window.Dispatcher.CheckAccess()) Apply();
             else window.Dispatcher.Invoke(Apply);
         }

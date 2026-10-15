@@ -182,6 +182,7 @@ public partial class MainWindow : Window
     private async void Connect_Click(object sender, RoutedEventArgs e)
     {
         if (Model.IsConnecting) { Model.CancelConnection(); return; }
+        if (Model.Connected) { Model.Disconnect(); return; }
         if (Model.Busy) { Model.Status = "当前任务正在进行，请先停止任务再连接。"; return; }
         if (File.Exists(Model.Settings.ProfilePath) && File.Exists(Model.Settings.GatewayTokenFile)) await Model.Connect();
         if (!Model.Connected) ShowConnectionGuide();
@@ -277,7 +278,7 @@ public partial class MainWindow : Window
             Model.SaveSettings();
             await Model.Connect(cancellation);
             return Model.Connected ? null : Model.Status;
-        }, saveConfiguration: Model.SaveSettings)
+        }, saveConfiguration: Model.SaveSettings, session: Model)
         { Owner = this };
         guide.ShowDialog();
     }

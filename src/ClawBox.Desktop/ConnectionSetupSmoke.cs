@@ -5,6 +5,7 @@ using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using ClawBox.Desktop.Models;
 using ClawBox.Desktop.Services;
+using ClawBox.Desktop.ViewModels;
 
 namespace ClawBox.Desktop;
 
@@ -55,13 +56,32 @@ public static class ConnectionSetupSmoke
         window.Width = 780; window.Height = 600; Capture("connection-guide-compact.png");
         window.Close();
         if (settings.Workspace != originalWorkspace) throw new InvalidOperationException("Connection settings changed the selected workspace.");
+        string sessionRoot = Path.Combine(Path.GetTempPath(), "QuantumHarness.Session.Smoke", Guid.NewGuid().ToString("N"));
+        using ShellViewModel session = new(new LocalState(sessionRoot));
+        session.Settings.ProfilePath = Path.Combine(sessionRoot, "connection.json");
+        session.Settings.GatewayTokenFile = Path.Combine(sessionRoot, "gateway.secrets.json");
+        File.WriteAllText(session.Settings.ProfilePath, "fixture-pairing");
+        File.WriteAllText(session.Settings.GatewayTokenFile, "fixture-token-placeholder");
+        typeof(ShellViewModel).GetProperty(nameof(ShellViewModel.ConnectionDevice))!.SetValue(session, new SetupRequest("192.168.137.2", 22, "fixture-identity"));
+        typeof(ShellViewModel).GetProperty(nameof(ShellViewModel.Connected))!.SetValue(session, true);
+        session.Status = "盒子已连接";
+        window = new(session.Settings, _ => throw new InvalidOperationException("Live state preview must not reconnect."), preview: true, session: session);
+        window.Show();
+        Capture("connection-guide-connected.png");
+        if (Descendants<TextBlock>(window).Any(t => t.Text == "等待")) throw new InvalidOperationException("Connected guide still displays initial waiting steps.");
+        Button disconnect = Descendants<Button>(window).Single(b => Equals(b.Content, "断开连接"));
+        disconnect.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Capture("connection-guide-disconnected.png");
+        if (session.Connected || !Descendants<TextBlock>(window).Any(t => t.Text == "已断开")) throw new InvalidOperationException("Disconnect did not synchronize the guide.");
+        window.Close();
+        Directory.Delete(sessionRoot, true);
         void Capture(string name, Window? target = null)
         {
             DispatcherFrame frame = new(); Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, () => frame.Continue = false); Dispatcher.PushFrame(frame);
             target ??= window;
             FrameworkElement content = (FrameworkElement)target.Content;
             content.UpdateLayout();
-            foreach (Button button in Descendants<Button>(target).Where(b => b.IsVisible && b.Content is string title && title is "使用已有配对连接" or "检查板子配置" or "绑定并连接" or "关闭" or "保存 IP 设置" or "恢复自动获取 IP"))
+            foreach (Button button in Descendants<Button>(target).Where(b => b.IsVisible && b.Content is string title && title is "使用已有配对连接" or "断开连接" or "返回对话" or "检查板子配置" or "绑定并连接" or "关闭" or "保存 IP 设置" or "恢复自动获取 IP"))
             {
                 Point position = button.TranslatePoint(new Point(), content);
                 if (position.X < -1 || position.Y < -1 || position.X + button.ActualWidth > content.ActualWidth + 1 || position.Y + button.ActualHeight > content.ActualHeight + 1)

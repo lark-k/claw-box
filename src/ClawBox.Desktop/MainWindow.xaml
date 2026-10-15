@@ -168,9 +168,7 @@
             <Button Click="New_Click" HorizontalAlignment="Left" Margin="0,0,0,12"><StackPanel Orientation="Horizontal"><TextBlock Style="{StaticResource Icon}" Text="&#xE70F;" Margin="0,0,10,0"/><TextBlock Text="新聊天"/></StackPanel></Button>
           </StackPanel>
           <StackPanel DockPanel.Dock="Bottom">
-            <Button Content="{Binding ConnectionButtonLabel}" Click="Connect_Click" Background="#EEECEE" ToolTip="{Binding Status}" Margin="0,10,0,0">
-              <Button.Style><Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Style.Triggers><DataTrigger Binding="{Binding Connected}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers></Style></Button.Style>
-            </Button>
+            <Button Content="{Binding ConnectionButtonLabel}" Click="Connect_Click" Background="#EEECEE" ToolTip="{Binding Status}" Margin="0,10,0,0"/>
             <TextBlock Text="{Binding Status}" TextWrapping="Wrap" FontSize="11" Foreground="#77717A" Margin="4,6,4,0" MaxHeight="100">
               <TextBlock.Style><Style TargetType="TextBlock"><Style.Triggers><DataTrigger Binding="{Binding Connected}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers></Style></TextBlock.Style>
             </TextBlock>

@@ -21,10 +21,23 @@ public sealed class ShellViewModel : Observable, IDisposable
     private readonly Dictionary<string, FileChanges.Snapshot> originals = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, ProjectGroup> projectGroups = new(StringComparer.OrdinalIgnoreCase);
     private readonly RuntimeSession runtime = new();
+    private int connectionRevision;
     private CancellationTokenSource? connecting;
     public bool IsConnecting => connecting is not null;
-    public string ConnectionButtonLabel => IsConnecting ? "停止连接" : "连接盒子";
+    public string ConnectionButtonLabel => IsConnecting ? "停止连接" : Connected ? "断开连接" : "连接盒子";
     public void CancelConnection() => connecting?.Cancel();
+    public bool HasConnectionAttempted { get; private set; }
+    public SetupRequest? ConnectionDevice { get; private set; }
+    private SetupRequest? inspectedDevice;
+    private readonly Dictionary<string, SetupUpdate> inspectedChecks = [];
+    internal void RememberCheck(SetupRequest device, SetupUpdate update)
+    {
+        if (update.Step is not ("boardIp" or "internet" or "board") || update.Status is "checking" or "waiting") return;
+        if (inspectedDevice != device) { inspectedChecks.Clear(); inspectedDevice = device; }
+        inspectedChecks[update.Step] = update;
+    }
+    internal SetupUpdate? RememberedCheck(string step) => inspectedDevice == ConnectionDevice && inspectedChecks.TryGetValue(step, out SetupUpdate? update)
+        ? update with { Detail = "最近检查：" + update.Detail } : null;
     private readonly DispatcherTimer timer;
     private CancellationTokenSource? turn;
     private bool userStopped;
@@ -53,7 +66,15 @@ public sealed class ShellViewModel : Observable, IDisposable
     public string ContextInfo => $"本地文字约 {Math.Ceiling((Messages.Sum(m => (long)m.Text.Length) + Input.Length) / 2.0):N0} 标记\n仅估算本地对话文字；不含盒子历史和工具内容。\n服务端未提供上下文容量和实际用量。";
     public DesktopSettings Settings { get; }
     public string Status { get => status; set => Set(ref status, value); }
-    public bool Connected { get => connected; private set => Set(ref connected, value); }
+    public bool Connected
+    {
+        get => connected;
+        private set
+        {
+            if (value) HasConnectionAttempted = true;
+            if (Set(ref connected, value)) { Changed(nameof(ConnectionButtonLabel)); Changed(nameof(CanSend)); }
+        }
+    }
     public bool Busy { get => busy; private set { Set(ref busy, value); Changed(nameof(CanSend)); Changed(nameof(CanManageChats)); Changed(nameof(IsResponding)); } }
     public bool IsResponding => Busy && turn is not null;
     public bool CanSend => Connected && !Busy && Approvals.Count == 0 && !Selected.HistoryUnavailable;
@@ -187,6 +208,7 @@ public sealed class ShellViewModel : Observable, IDisposable
     }
     public void SaveSettings()
     {
+        connectionRevision++;
         Settings.AccessMode = "approval"; Changed(nameof(AccessLabel)); automatic.Reset();
         timer.Stop(); runtime.Dispose(); Connected = false;
         Approvals.Clear(); Tasks.Clear(); Changed(nameof(CanSend));
@@ -196,6 +218,8 @@ public sealed class ShellViewModel : Observable, IDisposable
     public async Task Connect(CancellationToken cancellation = default)
     {
         if (Busy) return;
+        connectionRevision++;
+        HasConnectionAttempted = true;
         using CancellationTokenSource attempt = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
         connecting = attempt; Changed(nameof(IsConnecting)); Changed(nameof(ConnectionButtonLabel));
         Settings.AccessMode = "approval"; Changed(nameof(AccessLabel)); automatic.Reset();
@@ -203,6 +227,8 @@ public sealed class ShellViewModel : Observable, IDisposable
         Status = "正在连接盒子…";
         try
         {
+            BoardConnectionProfile profile = BoardConnectionProfile.Load(Settings.ProfilePath);
+            ConnectionDevice = new(profile.BoxHost, profile.SshPort, profile.HostKeyFingerprint);
             await runtime.Start(Settings, attempt.Token, message => Status = message);
             Connected = true; Status = "盒子已连接"; timer.Start();
             Changed(nameof(CanSend));
@@ -211,6 +237,17 @@ public sealed class ShellViewModel : Observable, IDisposable
         { Status = error.Message; }
         catch (OperationCanceledException) { Status = "连接已停止，请检查网络后重试。"; }
         finally { connecting = null; Changed(nameof(IsConnecting)); Changed(nameof(ConnectionButtonLabel)); Busy = false; }
+    }
+    public void Disconnect()
+    {
+        if (IsConnecting) { CancelConnection(); return; }
+        if (!CanManageChats) { Status = "请先停止当前任务并核对执行结果，再断开连接。"; return; }
+        HasConnectionAttempted = true;
+        connectionRevision++;
+        timer.Stop(); runtime.Dispose(); Connected = false;
+        Settings.AccessMode = "approval"; automatic.Reset(); Changed(nameof(AccessLabel));
+        Approvals.Clear(); Tasks.Clear();
+        Status = "盒子已断开。已有配对保留，可重新连接。";
     }
     public async Task Send()
     {
@@ -266,11 +303,14 @@ public sealed class ShellViewModel : Observable, IDisposable
     public async Task Refresh()
     {
         if (!Connected || refreshing) return;
+        int revision = connectionRevision;
+        ExecutorClient? executor = runtime.Executor;
         refreshing = true;
         try
         {
-            if (!runtime.Alive) throw new InvalidOperationException("盒子连接已断开。核对任务结果后重新连接。");
-            ToolRequest[] pending = await runtime.Executor!.Pending(CancellationToken.None);
+            if (!runtime.Alive || executor is null) throw new InvalidOperationException("盒子连接已断开。核对任务结果后重新连接。");
+            ToolRequest[] pending = await executor.Pending(CancellationToken.None);
+            if (!Connected || revision != connectionRevision) return;
             foreach (ApprovalCard old in Approvals.Where(a => !pending.Any(p => p.Call.RequestId == a.Request.Call.RequestId)).ToArray()) Approvals.Remove(old);
             foreach (ToolRequest request in pending)
                 if (!Approvals.Any(a => a.Request.Call.RequestId == request.Call.RequestId))
@@ -282,8 +322,10 @@ public sealed class ShellViewModel : Observable, IDisposable
                         Record(request.Call.RequestId, "请求 " + request.Call.Tool, new ApprovalCard(request).Summary, ProgressNarrator.Describe(request.Call, "pending", Settings.Workspace));
                     }
                 }
+            ExecutorTask[] tasks = await executor.Tasks(CancellationToken.None);
+            if (!Connected || revision != connectionRevision) return;
             Tasks.Clear();
-            foreach (ExecutorTask task in (await runtime.Executor.Tasks(CancellationToken.None)).OrderBy(t => t.CreatedAt))
+            foreach (ExecutorTask task in tasks.OrderBy(t => t.CreatedAt))
             {
                 if (!tracked.TryGetValue(task.RequestId, out var tracking) || activeReply is null) continue;
                 Tasks.Add(new(task));
@@ -306,7 +348,10 @@ public sealed class ShellViewModel : Observable, IDisposable
             });
         }
         catch (Exception error) when (error is IOException or System.Net.Http.HttpRequestException or InvalidOperationException or TaskCanceledException or JsonException)
-        { Connected = false; timer.Stop(); Status = "连接中断，请核对任务后重新连接。"; Changed(nameof(CanSend)); }
+        {
+            if (revision == connectionRevision)
+            { Connected = false; timer.Stop(); runtime.Dispose(); Status = "连接中断，请核对任务后重新连接。"; }
+        }
         finally { refreshing = false; }
     }
     public async Task Decide(ApprovalCard card, bool approve)
