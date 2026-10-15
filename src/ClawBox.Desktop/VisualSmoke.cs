@@ -147,6 +147,7 @@ public static class VisualSmoke
         }
         ConnectionSetupSmoke.Run(destination);
         HistoryRecoverySmoke.Run(destination);
+        ChatNavigationSmoke.Run(destination);
         window.Close();
         static void Pump(TimeSpan duration)
         {

@@ -63,6 +63,8 @@ public sealed class ShellViewModel : Observable, IDisposable
     }).ToArray();
     public IEnumerable<Conversation> Recent => FilteredConversations.Where(c => !c.IsProject || !Settings.Projects.Contains(c.WorkspacePath, StringComparer.OrdinalIgnoreCase)).ToArray();
     public string AccessLabel => Settings.AccessMode switch { "readOnly" => "只读", "fullAccess" => "完全访问", _ => "请求批准" };
+    public string AccessIcon => Settings.AccessMode switch { "readOnly" => "\uE890", "fullAccess" => "\uEA18", _ => "\uE815" };
+    public string AccessForeground => Settings.AccessMode switch { "readOnly" => "#377DF5", "fullAccess" => "#F06A22", _ => "#5B5C60" };
     public string ContextInfo => $"本地文字约 {Math.Ceiling((Messages.Sum(m => (long)m.Text.Length) + Input.Length) / 2.0):N0} 标记\n仅估算本地对话文字；不含盒子历史和工具内容。\n服务端未提供上下文容量和实际用量。";
     public DesktopSettings Settings { get; }
     public string Status { get => status; set => Set(ref status, value); }
@@ -109,7 +111,7 @@ public sealed class ShellViewModel : Observable, IDisposable
         this.state = state;
         store = new(state);
         Settings = state.Load("settings.json", () => new DesktopSettings());
-        Settings.AccessMode = "approval";
+        if (Settings.AccessMode is not ("approval" or "readOnly" or "fullAccess")) Settings.AccessMode = "approval";
         Conversations = new(store.Load());
         foreach (Conversation conversation in Conversations.Where(c => c.WorkspacePath.Length == 0))
         {
@@ -202,14 +204,16 @@ public sealed class ShellViewModel : Observable, IDisposable
     {
         if (mode is not ("approval" or "readOnly" or "fullAccess")) return;
         if (mode != Settings.AccessMode) automatic.Reset();
-        Settings.AccessMode = mode; Changed(nameof(AccessLabel));
+        Settings.AccessMode = mode;
+        state.Save("settings.json", Settings);
+        Changed(nameof(AccessLabel)); Changed(nameof(AccessIcon)); Changed(nameof(AccessForeground));
         foreach (ApprovalCard card in Approvals) card.Allowed = FileChanges.CanApprove(mode, card.Tool);
         _ = Refresh();
     }
     public void SaveSettings()
     {
         connectionRevision++;
-        Settings.AccessMode = "approval"; Changed(nameof(AccessLabel)); automatic.Reset();
+        automatic.Reset();
         timer.Stop(); runtime.Dispose(); Connected = false;
         Approvals.Clear(); Tasks.Clear(); Changed(nameof(CanSend));
         state.Save("settings.json", Settings);
@@ -222,7 +226,7 @@ public sealed class ShellViewModel : Observable, IDisposable
         HasConnectionAttempted = true;
         using CancellationTokenSource attempt = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
         connecting = attempt; Changed(nameof(IsConnecting)); Changed(nameof(ConnectionButtonLabel));
-        Settings.AccessMode = "approval"; Changed(nameof(AccessLabel)); automatic.Reset();
+        automatic.StartSession(DateTimeOffset.UtcNow);
         Busy = true; Connected = false; timer.Stop();
         Status = "正在连接盒子…";
         try
@@ -245,7 +249,7 @@ public sealed class ShellViewModel : Observable, IDisposable
         HasConnectionAttempted = true;
         connectionRevision++;
         timer.Stop(); runtime.Dispose(); Connected = false;
-        Settings.AccessMode = "approval"; automatic.Reset(); Changed(nameof(AccessLabel));
+        automatic.Reset();
         Approvals.Clear(); Tasks.Clear();
         Status = "盒子已断开。已有配对保留，可重新连接。";
     }

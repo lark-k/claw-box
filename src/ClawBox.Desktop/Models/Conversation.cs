@@ -22,7 +22,7 @@ public sealed class Message : Observable
 {
     private string text = "";
     public string Role { get; set; } = "assistant";
-    public string Text { get => text; set { if (Set(ref text, value)) { Changed(nameof(DisplayText)); Changed(nameof(HasText)); } } }
+    public string Text { get => text; set { if (Set(ref text, value)) { Changed(nameof(DisplayText)); Changed(nameof(HasText)); Changed(nameof(PreviewText)); } } }
     [JsonIgnore] public string DisplayText => Text.Trim();
     [JsonIgnore] public bool HasText => !string.IsNullOrWhiteSpace(Text);
     public DateTimeOffset At { get; set; } = DateTimeOffset.Now;
@@ -31,7 +31,7 @@ public sealed class Message : Observable
     private string duration = "处理过程";
     public string Duration { get => duration; set => Set(ref duration, value); }
     private bool processing;
-    [JsonIgnore] public bool IsProcessing { get => processing; set { if (Set(ref processing, value)) { ProgressExpanded = value; Changed(nameof(IsThinking)); } } }
+    [JsonIgnore] public bool IsProcessing { get => processing; set { if (Set(ref processing, value)) { ProgressExpanded = value; Changed(nameof(IsThinking)); Changed(nameof(PreviewText)); } } }
     private bool progressExpanded;
     [JsonIgnore] public bool ProgressExpanded { get => progressExpanded; set => Set(ref progressExpanded, value); }
     public ObservableCollection<ProgressEntry> ProgressEntries { get; set; } = [];
@@ -42,6 +42,10 @@ public sealed class Message : Observable
     private string waitingHint = "";
     [JsonIgnore] public string WaitingHint { get => waitingHint; set => Set(ref waitingHint, value); }
     [JsonIgnore] public string Label => Role == "user" ? "你" : Role == "system" ? "任务状态" : "Quantum";
+    [JsonIgnore] public string PreviewTitle => $"{Label} · {At:HH:mm}";
+    [JsonIgnore]
+    public string PreviewText => DisplayText.Length == 0 ? IsProcessing ? "正在处理这条消息…" : "这条消息没有正文。"
+        : DisplayText.Length > 600 ? DisplayText[..600] + "…" : DisplayText;
 }
 
 public sealed class Conversation : Observable

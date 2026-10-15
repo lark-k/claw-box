@@ -56,7 +56,7 @@ public sealed class ConversationLifecycleTests : IDisposable
             model.SetAccess("fullAccess");
             Assert.Equal("完全访问", model.AccessLabel);
             using ShellViewModel restarted = new(state);
-            Assert.Equal("请求批准", restarted.AccessLabel);
+            Assert.Equal("完全访问", restarted.AccessLabel);
             Assert.Contains(restarted.Conversations, c => c.Id == projectChat.Id && c.WorkspacePath == project);
             restarted.DeleteConversation(restarted.Conversations.Single(c => c.Id == projectChat.Id));
             Assert.DoesNotContain(restarted.Conversations, c => c.Id == projectChat.Id);
@@ -180,6 +180,21 @@ public sealed class ConversationLifecycleTests : IDisposable
         await Assert.ThrowsAsync<HttpRequestException>(() => automatic.Apply("fullAccess", [request], Approve));
         await automatic.Apply("fullAccess", [request], Approve);
         Assert.Equal(2, handler.Count);
+    }
+    [Fact]
+    public async Task Remembered_full_access_does_not_approve_requests_from_before_reconnect()
+    {
+        DateTimeOffset connectedAt = DateTimeOffset.UtcNow;
+        using JsonDocument arguments = JsonDocument.Parse("{}");
+        ToolRequest old = new(new(Guid.NewGuid(), "file.write", arguments.RootElement.Clone()), new string('A', 64), "pending", connectedAt.AddMinutes(-1), connectedAt.AddMinutes(4), null);
+        ToolRequest fresh = old with { Call = old.Call with { RequestId = Guid.NewGuid() }, CreatedAt = connectedAt.AddMilliseconds(1) };
+        List<Guid> approved = [];
+        AutomaticApprovals automatic = new(); automatic.StartSession(connectedAt);
+        Task Approve(ToolRequest request) { approved.Add(request.Call.RequestId); return Task.CompletedTask; }
+        await automatic.Apply("fullAccess", [old, fresh], Approve);
+        automatic.Reset();
+        await automatic.Apply("fullAccess", [old], Approve);
+        Assert.Equal(fresh.Call.RequestId, Assert.Single(approved));
     }
     private sealed class DecisionHandler(ToolRequest expected) : HttpMessageHandler
     {

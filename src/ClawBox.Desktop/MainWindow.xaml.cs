@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Threading;
 using ClawBox.Desktop.ViewModels;
 using Microsoft.Win32;
 
@@ -15,6 +16,8 @@ public partial class MainWindow : Window
     private bool startupAttempted;
     private bool paneOpen;
     private bool syncingSelection;
+    private bool followLatest = true;
+    private bool latestQueued;
     internal ContextMenu? SidebarMenu { get; private set; }
     public MainWindow(ShellViewModel model, bool preview = false)
     {
@@ -27,16 +30,22 @@ public partial class MainWindow : Window
             Height = Math.Min(Height, SystemParameters.WorkArea.Height - 24);
         }
         DataContext = model;
-        model.Messages.CollectionChanged += (_, _) => { Welcome.Visibility = model.Messages.Count == 0 ? Visibility.Visible : Visibility.Collapsed; ChatScroll.ScrollToEnd(); };
+        model.Messages.CollectionChanged += (_, _) =>
+        {
+            Welcome.Visibility = model.Messages.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+            UpdateChatNavigation();
+            if (followLatest) QueueLatest();
+        };
         model.Approvals.CollectionChanged += (_, _) => { if (model.Approvals.Count > 0) Dispatcher.BeginInvoke(() => ComposerSurface.BringIntoView()); };
         model.PropertyChanged += (_, args) =>
         {
-            if (args.PropertyName == nameof(model.Selected)) SyncSelection();
+            if (args.PropertyName == nameof(model.Selected)) { SyncSelection(); followLatest = true; QueueLatest(); }
         };
         Welcome.Visibility = model.Messages.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
     }
     private async void Window_Loaded(object sender, RoutedEventArgs e)
     {
+        QueueLatest();
         if (preview || startupAttempted) return;
         startupAttempted = true;
         if (await TryConnectOnStartup(Model.Settings, async () => { await Model.Connect(); return Model.Connected; })) return;
@@ -49,6 +58,49 @@ public partial class MainWindow : Window
     {
         if (SidebarColumn is not null) SidebarColumn.Width = new GridLength(ActualWidth >= 1700 ? 290 : 250);
         if (paneOpen && TaskColumn is not null) TaskColumn.Width = new GridLength(ActualWidth >= 1400 ? 380 : 310);
+        UpdateChatNavigation();
+    }
+    private bool AtLatest => ChatScroll.ScrollableHeight - ChatScroll.VerticalOffset <= 24;
+    private void QueueLatest()
+    {
+        if (latestQueued) return;
+        latestQueued = true;
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () =>
+        {
+            latestQueued = false;
+            if (!IsLoaded || !followLatest) return;
+            ChatScroll.UpdateLayout(); ChatScroll.ScrollToEnd();
+            UpdateChatNavigation();
+        });
+    }
+    private void UpdateChatNavigation()
+    {
+        if (JumpLatest is null || MessageRail is null || ChatScroll is null) return;
+        JumpLatest.Visibility = !AtLatest && Model.Messages.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        MessageRail.Visibility = Model.Messages.Count > 1 ? Visibility.Visible : Visibility.Collapsed;
+        MessageRail.Height = Math.Min(Math.Min(360, Math.Max(0, ChatScroll.ActualHeight - 40)), Model.Messages.Count * 12);
+    }
+    private void ChatScroll_Changed(object sender, ScrollChangedEventArgs e)
+    {
+        if (!ReferenceEquals(e.OriginalSource, ChatScroll)) return;
+        bool layoutChanged = e.ExtentHeightChange != 0 || e.ViewportHeightChange != 0;
+        if (!layoutChanged && e.VerticalChange != 0) followLatest = AtLatest;
+        if (layoutChanged && followLatest) QueueLatest();
+        UpdateChatNavigation();
+    }
+    private void ChatScroll_Wheel(object sender, MouseWheelEventArgs e) { if (e.Delta > 0) followLatest = false; }
+    private void ChatScroll_KeyDown(object sender, KeyEventArgs e) { if (e.Key is Key.Up or Key.PageUp or Key.Home) followLatest = false; }
+    private void JumpLatest_Click(object sender, RoutedEventArgs e) { followLatest = true; QueueLatest(); }
+    private void MessageMarker_Click(object sender, RoutedEventArgs e)
+    {
+        if (((Button)sender).Tag is not Models.Message message || !Model.Messages.Contains(message)) return;
+        followLatest = false;
+        ChatScroll.UpdateLayout();
+        if (MessageList.ItemContainerGenerator.ContainerFromItem(message) is FrameworkElement row)
+        {
+            double position = row.TranslatePoint(new Point(), ChatScroll).Y + ChatScroll.VerticalOffset;
+            ChatScroll.ScrollToVerticalOffset(Math.Max(0, position - 12));
+        }
     }
     private void ShowPane(bool visible) { paneOpen = visible; TaskColumn.Width = new GridLength(visible ? (ActualWidth >= 1400 ? 380 : 310) : 0); }
     private void ToggleTasks_Click(object sender, RoutedEventArgs e) => ShowPane(!paneOpen);
@@ -72,7 +124,7 @@ public partial class MainWindow : Window
     }
     private void AccessMode_Click(object sender, RoutedEventArgs e) { if (((MenuItem)sender).Tag is string mode) Model.SetAccess(mode); }
     private void AccessHelp_Click(object sender, RoutedEventArgs e) => MessageBox.Show(this,
-        "请求批准：每次工具请求都由你确认。\n只读访问：仅允许批准读取操作。\n完全访问：APP 自动批准当前工作区内通过路径和参数校验的请求。\n\n切换工作区、重连或重启后恢复请求批准。", "访问权限", MessageBoxButton.OK, MessageBoxImage.Information);
+        "请求批准：每次工具请求都由你确认。\n只读访问：仅允许批准读取操作。\n完全访问：APP 自动批准当前工作区内通过路径和参数校验的新请求。\n\n自动记住上次选择，切换对话和重启后继续使用。重连前遗留的请求仍需手动核对。", "访问权限", MessageBoxButton.OK, MessageBoxImage.Information);
     private void DeleteConversation_Click(object sender, RoutedEventArgs e)
     {
         if (SidebarMenu is not null) SidebarMenu.IsOpen = false;

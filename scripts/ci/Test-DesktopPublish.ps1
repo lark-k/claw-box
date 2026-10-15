@@ -31,4 +31,9 @@ foreach ($name in @('ethernet-ip-settings.png','connection-import.png')) {
     try { if ($bitmap.Width -lt 550 -or $bitmap.Height -lt 300) { throw 'Invalid connection settings popup rendering.' } } finally { $bitmap.Dispose() }
 }
 if ((Get-FileHash (Join-Path $destination 'chat.png')).Hash -eq (Get-FileHash (Join-Path $destination 'approval.png')).Hash) { throw 'Approval UI did not render.' }
+foreach ($name in @('chat-latest.png','chat-reading-history.png','chat-message-location.png','chat-reentered-latest.png','access-approval.png','access-readOnly.png','access-fullAccess.png')) {
+    $bitmap=[Drawing.Bitmap]::new((Join-Path $destination $name))
+    try { if ($bitmap.Width -lt 900 -or $bitmap.Height -lt 600) { throw 'Invalid chat navigation rendering.' } } finally { $bitmap.Dispose() }
+}
+if (-not (Test-Path -LiteralPath (Join-Path $destination 'chat-message-preview.png'))) { throw 'Message preview did not render.' }
 Write-Host "Self-contained desktop EXE and visual states passed: $destination"

@@ -33,11 +33,11 @@
       </ControlTemplate></Setter.Value></Setter>
     </Style>
     <Style x:Key="AccessChip" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
-      <Setter Property="Foreground" Value="#F06A22"/><Setter Property="FontSize" Value="13"/><Setter Property="Padding" Value="7,5"/>
+      <Setter Property="Foreground" Value="{Binding AccessForeground}"/><Setter Property="FontSize" Value="13"/><Setter Property="Padding" Value="7,5"/>
       <Setter Property="Background" Value="#F3F2F2"/>
       <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
         <Border x:Name="Chip" CornerRadius="15" Padding="{TemplateBinding Padding}" Background="{TemplateBinding Background}">
-          <StackPanel Orientation="Horizontal"><TextBlock Text="&#xEA18;" FontFamily="Segoe Fluent Icons" FontSize="15" VerticalAlignment="Center" Margin="0,0,6,0"/><ContentPresenter VerticalAlignment="Center"/></StackPanel>
+          <StackPanel Orientation="Horizontal"><TextBlock x:Name="AccessGlyph" Text="{Binding AccessIcon}" FontFamily="Segoe Fluent Icons" FontSize="15" VerticalAlignment="Center" Margin="0,0,6,0"/><ContentPresenter VerticalAlignment="Center"/></StackPanel>
         </Border><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chip" Property="Background" Value="#ECEBED"/></Trigger></ControlTemplate.Triggers>
       </ControlTemplate></Setter.Value></Setter>
     </Style>
@@ -50,8 +50,8 @@
         <MenuItem.Icon><TextBlock Text="&#xE815;" FontFamily="Segoe Fluent Icons" FontSize="18" Foreground="#5B5C60"/></MenuItem.Icon>
         <MenuItem.Header><StackPanel><TextBlock Text="请求批准" FontSize="13"/><TextBlock Text="读取、修改文件和运行项目时逐次询问" Foreground="#96969C" FontSize="11" Margin="0,2,0,0"/></StackPanel></MenuItem.Header>
       </MenuItem>
-      <MenuItem Tag="readOnly" Click="AccessMode_Click">
-        <MenuItem.Icon><TextBlock Text="&#xE890;" FontFamily="Segoe Fluent Icons" FontSize="18" Foreground="#5B5C60"/></MenuItem.Icon>
+      <MenuItem Tag="readOnly" Click="AccessMode_Click" Foreground="#377DF5">
+        <MenuItem.Icon><TextBlock Text="&#xE890;" FontFamily="Segoe Fluent Icons" FontSize="18"/></MenuItem.Icon>
         <MenuItem.Header><StackPanel><TextBlock Text="只读访问" FontSize="13"/><TextBlock Text="仅批准读取；不允许修改或运行项目" Foreground="#96969C" FontSize="11" Margin="0,2,0,0"/></StackPanel></MenuItem.Header>
       </MenuItem>
       <MenuItem Tag="fullAccess" Click="AccessMode_Click" Foreground="#F06A22">
@@ -109,6 +109,26 @@
       </ControlTemplate></Setter.Value></Setter>
     </Style>
     <Style x:Key="Icon" TargetType="TextBlock"><Setter Property="FontFamily" Value="Segoe Fluent Icons"/><Setter Property="FontSize" Value="17"/><Setter Property="VerticalAlignment" Value="Center"/></Style>
+    <Style x:Key="MessageMarker" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+      <Setter Property="Padding" Value="0"/><Setter Property="ToolTipService.InitialShowDelay" Value="120"/><Setter Property="ToolTipService.BetweenShowDelay" Value="0"/><Setter Property="ToolTipService.ShowDuration" Value="60000"/>
+      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+        <Border Background="Transparent"><Border x:Name="Marker" Height="2" Width="12" CornerRadius="1" Background="#D2D2D6" HorizontalAlignment="Left" VerticalAlignment="Center"/></Border>
+        <ControlTemplate.Triggers>
+          <DataTrigger Binding="{Binding Role}" Value="user"><Setter TargetName="Marker" Property="Width" Value="20"/></DataTrigger>
+          <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Marker" Property="Width" Value="28"/><Setter TargetName="Marker" Property="Background" Value="#36363B"/></Trigger>
+          <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Marker" Property="Width" Value="28"/><Setter TargetName="Marker" Property="Background" Value="#36363B"/></Trigger>
+        </ControlTemplate.Triggers>
+      </ControlTemplate></Setter.Value></Setter>
+    </Style>
+    <Style x:Key="MessagePreview" TargetType="ToolTip">
+      <Setter Property="Placement" Value="Right"/><Setter Property="HorizontalOffset" Value="12"/>
+      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ToolTip">
+        <Border Background="White" BorderBrush="#E4E3E7" BorderThickness="1" CornerRadius="12" Padding="14,12" Margin="8">
+          <Border.Effect><DropShadowEffect BlurRadius="18" ShadowDepth="4" Opacity="0.14"/></Border.Effect>
+          <ContentPresenter/>
+        </Border>
+      </ControlTemplate></Setter.Value></Setter>
+    </Style>
     <Style x:Key="ConversationItem" TargetType="ListBoxItem">
       <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
       <Setter Property="Margin" Value="0,1"/><Setter Property="Padding" Value="12,8"/><Setter Property="HorizontalContentAlignment" Value="Stretch"/>
@@ -204,8 +224,8 @@
             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition x:Name="TaskColumn" Width="0"/></Grid.ColumnDefinitions>
             <Grid>
               <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-              <ScrollViewer x:Name="ChatScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                <StackPanel MaxWidth="920" Margin="32,16,32,18">
+              <ScrollViewer x:Name="ChatScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" ScrollChanged="ChatScroll_Changed" PreviewMouseWheel="ChatScroll_Wheel" PreviewKeyDown="ChatScroll_KeyDown">
+                <StackPanel MaxWidth="920" Margin="46,16,32,18">
                   <StackPanel x:Name="Welcome" Margin="0,76,0,30"><TextBlock Text="把想法，变成完成的工作。" FontSize="24" FontWeight="SemiBold" Margin="0,0,0,12"/><TextBlock Text="描述你的需求，Quantum 为你整理文档、开发代码。" Foreground="#838087" FontSize="13" TextWrapping="Wrap"/><WrapPanel Margin="0,24,0,0"><Button Content="整理文本内容" Click="Suggestion_Click" Tag="请读取我选择的文本文件，梳理重点并给出摘要。" Background="#F6F5F6" Margin="0,0,8,8"/><Button Content="生成 Word 文档" Click="Suggestion_Click" Tag="请根据我提供的内容，在工作目录中新建一份 Word 文档。" Background="#F6F5F6" Margin="0,0,8,8"/><Button Content="开发项目功能" Click="Suggestion_Click" Tag="请分析我选择的项目，根据需求实现功能并执行构建与测试。" Background="#F6F5F6" Margin="0,0,8,8"/></WrapPanel></StackPanel>
                   <ItemsControl x:Name="MessageList" ItemsSource="{Binding Messages}"><ItemsControl.ItemTemplate><DataTemplate>
                     <StackPanel Margin="0,4,0,24">
@@ -252,6 +272,19 @@
                   </DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
                 </StackPanel>
               </ScrollViewer>
+              <ItemsControl x:Name="MessageRail" ItemsSource="{Binding Messages}" Width="30" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="6,0,0,0" Visibility="Collapsed">
+                <ItemsControl.ItemsPanel><ItemsPanelTemplate><UniformGrid Columns="1"/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate><DataTemplate>
+                  <Button Style="{StaticResource MessageMarker}" Tag="{Binding}" Click="MessageMarker_Click" AutomationProperties.Name="{Binding PreviewTitle}">
+                    <Button.ToolTip><ToolTip Style="{StaticResource MessagePreview}" DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                      <StackPanel Width="330"><TextBlock Text="{Binding PreviewTitle}" FontWeight="SemiBold" FontSize="13" Margin="0,0,0,7"/><TextBlock Text="{Binding PreviewText}" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxHeight="140" LineHeight="21" FontSize="12" Foreground="#797980"/></StackPanel>
+                    </ToolTip></Button.ToolTip>
+                  </Button>
+                </DataTemplate></ItemsControl.ItemTemplate>
+              </ItemsControl>
+              <Button x:Name="JumpLatest" Width="36" Height="36" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,10" Visibility="Collapsed" Click="JumpLatest_Click" ToolTip="回到最新消息" AutomationProperties.Name="回到最新消息">
+                <Button.Template><ControlTemplate TargetType="Button"><Border x:Name="JumpSurface" CornerRadius="18" Background="White" BorderBrush="#E5E4E8" BorderThickness="1"><TextBlock Text="&#xE74B;" FontFamily="Segoe Fluent Icons" FontSize="18" Foreground="#34343A" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="JumpSurface" Property="Background" Value="#F4F4F6"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Button.Template>
+              </Button>
               <StackPanel Grid.Row="1" Margin="28,10,28,14" MaxWidth="920">
                 <ItemsControl ItemsSource="{Binding Attachments}"><ItemsControl.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" TextTrimming="CharacterEllipsis" Foreground="#79717D" FontSize="11" Margin="0,2,0,6"/></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
                 <ItemsControl ItemsSource="{Binding VisibleApprovals}"><ItemsControl.ItemTemplate><DataTemplate>
