@@ -18,7 +18,7 @@ public sealed class ConnectionSetupWindow : Window
 {
     private readonly DesktopSettings settings;
     private readonly Func<CancellationToken, Task<string?>> connect;
-    private readonly BoardSetup setup = new();
+    private BoardSetup setup;
     private readonly BoardIdentity identity = new();
     private readonly Dictionary<string, SetupRequest> observed = [];
     private readonly Action? saveConfiguration;
@@ -60,6 +60,7 @@ public sealed class ConnectionSetupWindow : Window
     public ConnectionSetupWindow(DesktopSettings settings, Func<CancellationToken, Task<string?>> connect, bool preview = false, Action? saveConfiguration = null, ShellViewModel? session = null)
     {
         this.settings = settings; this.connect = connect; this.saveConfiguration = saveConfiguration; isPreview = preview; this.session = session;
+        setup = new(pairingId: settings.PairingId);
         Title = "Quantum Harness · 连接引导"; Width = 890; Height = 790; MinWidth = 760; MinHeight = 580;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
         FontFamily = new("Microsoft YaHei UI"); FontSize = 14; Background = Brushes.White;
@@ -93,7 +94,7 @@ public sealed class ConnectionSetupWindow : Window
         Expander help = new() { Header = "网线直连电脑，怎样让板子联网？", Margin = new Thickness(0, 0, 0, 16) };
         help.Content = new TextBlock { Text = "1. 板子接电，用网线连电脑；电脑先连 Wi-Fi 或热点。\n2. 若板子固定 192.168.137.2 / 24，点“设置以太网 IP”，电脑用 192.168.137.1，掩码 255.255.255.0，网关留空。\n3. 点“设置网络共享”，在上网网卡的“共享”页允许其他网络用户连接，目标选插板子的以太网网卡。\n回到本窗口会自动复查，填写密码后配对即可。", TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 0), Foreground = Brushes.Gray };
         form.Children.Add(help);
-        form.Children.Add(new TextBlock { Text = "绑定先检查已有配对、插件和聊天配置，仅补齐缺项；必要时重启网关。首次确认后，设备身份变化会停止连接。", TextWrapping = TextWrapping.Wrap, Foreground = Brushes.Gray, FontSize = 12 });
+        form.Children.Add(new TextBlock { Text = "绑定先检查已有配对、插件和聊天配置，仅补齐缺项；必要时重启网关。设备身份变化会停止连接；换板请关闭本窗口，从设置中的“更换板子／重新绑定”开始。", TextWrapping = TextWrapping.Wrap, Foreground = Brushes.Gray, FontSize = 12 });
         Expander advanced = new() { Header = "高级：导入已有配对", Margin = new Thickness(0, 16, 0, 0) };
         StackPanel advancedPanel = new(); advanced.Content = advancedPanel; form.Children.Add(advanced);
         AddAction(advancedPanel, "Windows 以太网设置", () => OpenSettings("ms-settings:network-ethernet"));
@@ -101,6 +102,7 @@ public sealed class ConnectionSetupWindow : Window
         {
             SettingsWindow dialog = new(settings) { Owner = this };
             if (dialog.ShowDialog() != true) return;
+            setup = new(pairingId: settings.PairingId);
             saveConfiguration?.Invoke(); observed.Clear(); LoadExisting(); InputsChanged();
             summary.Text = "已有配对已导入，点击“使用已有配对连接”应用。";
         });

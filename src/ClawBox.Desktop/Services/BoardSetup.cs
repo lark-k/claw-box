@@ -76,11 +76,20 @@ public sealed class BoardSetup
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
     private readonly string dataRoot;
+    private readonly string pairingId;
     private readonly Func<IBoardSetupTransport> createTransport;
-    public BoardSetup(string? dataRoot = null, Func<IBoardSetupTransport>? createTransport = null)
+    public BoardSetup(string? dataRoot = null, Func<IBoardSetupTransport>? createTransport = null, string pairingId = "")
     {
         this.dataRoot = dataRoot ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ClawBox");
         this.createTransport = createTransport ?? (() => new SshBoardSetupTransport());
+        this.pairingId = pairingId;
+        if (pairingId != "") _ = ReplacementDirectory(pairingId, this.dataRoot);
+    }
+    internal static string ReplacementDirectory(string pairingId, string? dataRoot = null)
+    {
+        if (!Guid.TryParseExact(pairingId, "N", out Guid id) || id.ToString("N") != pairingId)
+            throw new SetupException("local", "换板配对编号无效，请从设置中的“更换板子／重新绑定”重新开始。");
+        return Path.Combine(dataRoot ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ClawBox"), "connections", "replacement-" + pairingId);
     }
     public static string? OpenSshTool(string name)
     {
@@ -133,7 +142,7 @@ public sealed class BoardSetup
         request.Validate(); RequirePassword(password);
         if (OpenSshTool("ssh.exe") is null || OpenSshTool("ssh-keygen.exe") is null)
             throw new SetupException("local", "请先在 Windows 可选功能中安装 OpenSSH 客户端，返回后会自动复查。");
-        string pairing = Path.Combine(dataRoot, "connections", request.Host + "-" + request.Port);
+        string pairing = pairingId == "" ? Path.Combine(dataRoot, "connections", request.Host + "-" + request.Port) : ReplacementDirectory(pairingId, dataRoot);
         string profilePath = Path.Combine(pairing, "connection.json");
         string identity = Path.Combine(pairing, "tunnel_ed25519");
         // Never silently replace a pinned identity, even when a prior pairing is incomplete.
@@ -141,7 +150,7 @@ public sealed class BoardSetup
         {
             BoardConnectionProfile old = BoardConnectionProfile.Load(profilePath);
             if (old.BoxHost != request.Host || old.SshPort != request.Port || old.SshUser != "root" || old.HostKeyFingerprint != request.Fingerprint || old.RemotePort != 18791 || old.ExecutorPort != 18790 || old.GatewayLocalPort != 18889 || old.IdentityFile != identity)
-                throw new SetupException("identity", "已有配对与本次输入不同。请使用原配对连接，或让管理员撤销旧配对后再绑定；软件不会替换设备身份或自定义端口。");
+                throw new SetupException("identity", "已有配对与本次输入不同。换板请先关闭向导，从设置中的“更换板子／重新绑定”开始；软件不会自动替换设备身份或自定义端口。");
         }
         using IBoardSetupTransport transport = createTransport();
         progress.Report(new("identity", "checking", "正在核验设备身份和登录…"));

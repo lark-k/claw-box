@@ -19,6 +19,7 @@ public partial class MainWindow : Window
     private bool followLatest = true;
     private bool latestQueued;
     internal ContextMenu? SidebarMenu { get; private set; }
+    internal ContextMenu? SettingsMenu { get; private set; }
     public MainWindow(ShellViewModel model, bool preview = false)
     {
         this.preview = preview;
@@ -319,8 +320,38 @@ public partial class MainWindow : Window
         "Quantum Harness 使用帮助", MessageBoxButton.OK, MessageBoxImage.Information);
     private void Settings_Click(object sender, RoutedEventArgs e)
     {
-        if (!Model.CanManageChats) { Model.Status = "请先结束当前任务，再修改连接设置。"; return; }
-        ShowConnectionGuide();
+        OpenSettingsMenu((FrameworkElement)sender);
+    }
+    internal void OpenSettingsMenu(FrameworkElement target)
+    {
+        ContextMenu menu = new() { PlacementTarget = target, Placement = System.Windows.Controls.Primitives.PlacementMode.Right };
+        MenuItem guide = new() { Header = "连接向导", ToolTip = "检查网络、断开或重连当前板子，保留已有配对。" };
+        MenuItem replace = new() { Header = "更换板子／重新绑定", ToolTip = "停止使用旧配对，为新板或当前板子重新绑定；保留聊天和工作区。" };
+        foreach (MenuItem item in new[] { guide, replace })
+        {
+            item.SetBinding(IsEnabledProperty, new System.Windows.Data.Binding(nameof(Model.CanManageChats)) { Source = Model });
+            ToolTipService.SetShowOnDisabled(item, true);
+        }
+        guide.Click += (_, _) => ShowConnectionGuide();
+        replace.Click += (_, _) =>
+        {
+            if (!ConfirmBoardReplacement(() => new BoardReplacementWindow { Owner = this }.ShowDialog() == true)) return;
+            ShowConnectionGuide();
+        };
+        menu.Items.Add(guide); menu.Items.Add(new Separator()); menu.Items.Add(replace);
+        SettingsMenu = menu; menu.IsOpen = true;
+    }
+    internal bool ConfirmBoardReplacement(Func<bool> confirm)
+    {
+        if (!Model.CanManageChats || Model.IsConnecting) { Model.Status = "请先结束当前任务、处理待审批请求并停止连接，再更换板子。"; return false; }
+        if (!confirm()) return false;
+        try { return Model.BeginBoardReplacement(); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            Model.Status = "无法保存换板设置，原配对仍保留。";
+            MessageBox.Show(this, Model.Status + "\n" + error.Message, "未更换板子", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return false;
+        }
     }
     private void ShowConnectionGuide()
     {
@@ -330,7 +361,7 @@ public partial class MainWindow : Window
             Model.SaveSettings();
             await Model.Connect(cancellation);
             return Model.Connected ? null : Model.Status;
-        }, saveConfiguration: Model.SaveSettings, session: Model)
+        }, preview: preview, saveConfiguration: Model.SaveSettings, session: Model)
         { Owner = this };
         guide.ShowDialog();
     }

@@ -27,11 +27,12 @@ public sealed class BoardSetupTests : IDisposable
         public string Secret { get; set; } = JsonSerializer.Serialize(new { token = new string('g', 64) });
         public bool CancelInstallation { get; set; }
         public bool WrongKey { get; set; }
+        public byte[] Key { get; set; } = HostKey;
         public BoardNetwork? Network { get; set; }
         public Task<string> Connect(SetupRequest request, string password, CancellationToken cancellation)
         {
             cancellation.ThrowIfCancellationRequested();
-            byte[] key = WrongKey ? new byte[32] : HostKey;
+            byte[] key = WrongKey ? new byte[32] : Key;
             return Task.FromResult(request.Host + " ssh-ed25519 " + Convert.ToBase64String(key));
         }
         public Task<BoardReadiness> Inspect(CancellationToken cancellation) => Task.FromResult(new BoardReadiness(Issues) { Network = Network });
@@ -163,6 +164,58 @@ public sealed class BoardSetupTests : IDisposable
         string original = File.ReadAllText(result.ProfilePath);
         SetupException error = await Assert.ThrowsAsync<SetupException>(() => setup.Provision(Request with { Fingerprint = "SHA256:" + new string('A', 43) }, "password", new Updates(), CancellationToken.None));
         Assert.Contains("已有配对", error.Message); Assert.Equal(original, File.ReadAllText(result.ProfilePath));
+    }
+    [Fact]
+    public async Task Explicit_replacement_accepts_new_board_at_same_address_without_overwriting_old_pairing()
+    {
+        Board original = new();
+        SetupResult previous = await new BoardSetup(root, () => original).Provision(Request, "password", new Updates(), CancellationToken.None);
+        string oldDirectory = Path.GetDirectoryName(previous.ProfilePath)!;
+        Dictionary<string, byte[]> saved = Directory.GetFiles(oldDirectory).ToDictionary(p => p, File.ReadAllBytes);
+        string tokens = File.ReadAllText(Path.Combine(root, "executor", "tokens.secrets.json"));
+        byte[] newKey = HostKey.ToArray(); newKey[^1] ^= 1;
+        SetupRequest next = Request with { Fingerprint = "SHA256:" + Convert.ToBase64String(SHA256.HashData(newKey)).TrimEnd('=') };
+        Board replacement = new() { Key = newKey, Secret = JsonSerializer.Serialize(new { token = new string('n', 64) }) };
+        string id = Guid.NewGuid().ToString("N");
+        BoardSetup setup = new(root, () => replacement, pairingId: id);
+        SetupResult result = await setup.Provision(next, "password", new Updates(), CancellationToken.None);
+        BoardConnectionProfile profile = BoardConnectionProfile.Load(result.ProfilePath);
+        Assert.Equal(next.Fingerprint, profile.HostKeyFingerprint);
+        Assert.Equal(Path.Combine(root, "connections", "replacement-" + id, "connection.json"), result.ProfilePath);
+        Assert.NotEqual(File.ReadAllText(Path.Combine(oldDirectory, "tunnel_ed25519")), File.ReadAllText(profile.IdentityFile));
+        Assert.Equal(replacement.Secret, File.ReadAllText(result.GatewayTokenFile));
+        Assert.Equal(original.Worker, replacement.Worker);
+        Assert.Equal(tokens, File.ReadAllText(Path.Combine(root, "executor", "tokens.secrets.json")));
+        foreach ((string path, byte[] bytes) in saved) Assert.Equal(bytes, File.ReadAllBytes(path));
+        // Reusing the replacement slot is idempotent, but it cannot accept another identity.
+        Assert.Equal(result, await setup.Provision(next, "password", new Updates(), CancellationToken.None));
+        await Assert.ThrowsAsync<SetupException>(() => setup.Provision(Request, "password", new Updates(), CancellationToken.None));
+        Assert.Equal(next.Fingerprint, BoardConnectionProfile.Load(result.ProfilePath).HostKeyFingerprint);
+    }
+    [Fact]
+    public async Task Replacement_interruption_preserves_its_pin_and_key_for_explicit_retry()
+    {
+        Board board = new() { CancelInstallation = true };
+        string id = Guid.NewGuid().ToString("N");
+        BoardSetup setup = new(root, () => board, pairingId: id);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => setup.Provision(Request, "password", new Updates(), CancellationToken.None));
+        string directory = Path.Combine(root, "connections", "replacement-" + id);
+        string key = File.ReadAllText(Path.Combine(directory, "tunnel_ed25519"));
+        Assert.False(File.Exists(Path.Combine(directory, "connection.json")));
+        await Assert.ThrowsAsync<SetupException>(() => setup.Provision(Request with { Fingerprint = "SHA256:" + new string('A', 43) }, "password", new Updates(), CancellationToken.None));
+        board.CancelInstallation = false;
+        SetupResult result = await setup.Provision(Request, "password", new Updates(), CancellationToken.None);
+        Assert.Equal(key, File.ReadAllText(BoardConnectionProfile.Load(result.ProfilePath).IdentityFile));
+    }
+    [Theory]
+    [InlineData("../escape")]
+    [InlineData("C:\\outside")]
+    [InlineData("12345678-1234-1234-1234-123456789abc")]
+    [InlineData("ABCDEF0123456789ABCDEF0123456789")]
+    public void Replacement_identifier_cannot_select_arbitrary_paths(string id)
+    {
+        Assert.Throws<SetupException>(() => new BoardSetup(root, pairingId: id));
+        Assert.False(Directory.Exists(root));
     }
     [Fact]
     public async Task Canceled_operation_never_starts_authentication()

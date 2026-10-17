@@ -114,6 +114,81 @@ public sealed class ConnectionSessionTests
         fixture.Model.Disconnect(); Assert.False(fixture.Model.Connected);
     });
 
+    [Fact]
+    public void Replacing_board_disconnects_and_persists_fresh_pairing_without_touching_history_or_old_files() => RunSta(() =>
+    {
+        using Fixture fixture = new();
+        ShellViewModel model = fixture.Model;
+        string oldProfile = model.Settings.ProfilePath, oldGateway = model.Settings.GatewayTokenFile;
+        string root = Path.GetDirectoryName(oldProfile)!;
+        model.AddProject(Path.Combine(root, "project"));
+        model.Selected.Messages.Add(new() { Text = "保留的聊天内容" });
+        model.RenameConversation(model.Selected, "保留的会话");
+        model.SetAccess("fullAccess");
+        Guid chat = model.Selected.Id; string workspace = model.Settings.Workspace;
+        string chatPath = new ConversationStore(new LocalState(root)).FilePath(chat, model.Selected.CreatedAt);
+        byte[] history = File.ReadAllBytes(chatPath);
+        string userFile = Path.Combine(root, "user-file.txt"); File.WriteAllText(userFile, "保留用户文件");
+        fixture.Connect();
+        Invoke(model, "RememberCheck", fixture.Device, new SetupUpdate("boardIp", "ready", "old device"));
+        Assert.True(model.BeginBoardReplacement());
+        Assert.False(model.Connected); Assert.False(model.HasConnectionAttempted); Assert.Null(model.ConnectionDevice);
+        Assert.False(model.CanSend); Assert.Null(Invoke(model, "RememberedCheck", "boardIp"));
+        Assert.True(Guid.TryParseExact(model.Settings.PairingId, "N", out _));
+        Assert.False(File.Exists(model.Settings.ProfilePath)); Assert.False(File.Exists(model.Settings.GatewayTokenFile));
+        Assert.NotEqual(oldProfile, model.Settings.ProfilePath);
+        Assert.Equal("fixture-pairing", File.ReadAllText(oldProfile));
+        Assert.Equal("fixture-token-placeholder", File.ReadAllText(oldGateway));
+        Assert.Equal(history, File.ReadAllBytes(chatPath)); Assert.Equal("保留用户文件", File.ReadAllText(userFile));
+        Assert.Equal(chat, model.Selected.Id); Assert.Equal(workspace, model.Settings.Workspace); Assert.Equal("完全访问", model.AccessLabel);
+        using ShellViewModel restarted = new(new LocalState(root));
+        Assert.Equal(model.Settings.PairingId, restarted.Settings.PairingId);
+        Assert.Equal(model.Settings.ProfilePath, restarted.Settings.ProfilePath);
+        Assert.Equal(model.Settings.GatewayTokenFile, restarted.Settings.GatewayTokenFile);
+        Assert.Equal("保留的聊天内容", Assert.Single(restarted.Conversations.Single(c => c.Id == chat).Messages).Text);
+        ConnectionSetupWindow guide = fixture.Open();
+        try
+        {
+            Assert.True(Field<PasswordBox>(guide, "password").IsEnabled);
+            Assert.False(Field<Button>(guide, "reconnect").IsEnabled);
+            Assert.NotEqual("✓ 已通过", Rows(guide)["identity"].Status.Text);
+        }
+        finally { guide.Close(); }
+    });
+
+    [Theory]
+    [InlineData("busy")]
+    [InlineData("approval")]
+    [InlineData("task")]
+    public void Replacement_is_blocked_while_work_or_approval_is_pending(string mode) => RunSta(() =>
+    {
+        using Fixture fixture = new(); fixture.Connect(); ShellViewModel model = fixture.Model;
+        string profile = model.Settings.ProfilePath;
+        using System.Text.Json.JsonDocument arguments = System.Text.Json.JsonDocument.Parse("{\"path\":\"file.txt\"}");
+        if (mode == "busy") typeof(ShellViewModel).GetProperty(nameof(ShellViewModel.Busy))!.SetValue(model, true);
+        if (mode == "approval") model.Approvals.Add(new(new(new(Guid.NewGuid(), "file.read", arguments.RootElement.Clone()), new string('A', 64), "pending", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(5), null)));
+        if (mode == "task") model.Tasks.Add(new(new(Guid.NewGuid(), Guid.NewGuid(), "file.write", "running", DateTimeOffset.UtcNow, null, null, null)));
+        Assert.False(model.BeginBoardReplacement());
+        Assert.True(model.Connected); Assert.Equal(profile, model.Settings.ProfilePath); Assert.Equal("", model.Settings.PairingId);
+        Assert.Equal("fixture-pairing", File.ReadAllText(profile));
+        Assert.Contains("请先结束", model.Status);
+    });
+
+    [Fact]
+    public void Failed_replacement_settings_save_keeps_previous_pairing_and_connection() => RunSta(() =>
+    {
+        using Fixture fixture = new(); fixture.Model.SaveSettings(); fixture.Connect();
+        string profile = fixture.Model.Settings.ProfilePath, gateway = fixture.Model.Settings.GatewayTokenFile;
+        string settings = Path.Combine(Path.GetDirectoryName(profile)!, "settings.json");
+        byte[] original = File.ReadAllBytes(settings);
+        File.SetAttributes(settings, FileAttributes.ReadOnly);
+        try { Assert.Throws<UnauthorizedAccessException>(() => fixture.Model.BeginBoardReplacement()); }
+        finally { File.SetAttributes(settings, FileAttributes.Normal); }
+        Assert.True(fixture.Model.Connected); Assert.Equal(fixture.Device, fixture.Model.ConnectionDevice);
+        Assert.Equal("", fixture.Model.Settings.PairingId); Assert.Equal(profile, fixture.Model.Settings.ProfilePath);
+        Assert.Equal(gateway, fixture.Model.Settings.GatewayTokenFile); Assert.Equal(original, File.ReadAllBytes(settings));
+    });
+
     private sealed class Fixture : IDisposable
     {
         private readonly string root = Path.Combine(Path.GetTempPath(), "QuantumHarness.Session.Tests", Guid.NewGuid().ToString("N"));

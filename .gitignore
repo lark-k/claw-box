@@ -35,6 +35,8 @@ TestResults/
 .env.*
 !.env.example
 *.secrets.json
+# Credential backups and interrupted atomic writes must stay private too.
+*.secrets.json.*
 appsettings.Local.json
 *.sqlite
 *.sqlite-*

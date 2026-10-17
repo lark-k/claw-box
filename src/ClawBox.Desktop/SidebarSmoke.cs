@@ -106,6 +106,53 @@ public static class SidebarSmoke
         capture("workspace-removed.png");
         if (model.Projects.Any(p => p.Path == project) || !model.Recent.Contains(first) || !File.Exists(userFile)) throw new InvalidOperationException("Workspace removal must only hide the project.");
 
+        string oldProfile = Path.Combine(root, "old-connection.json"), oldGateway = Path.Combine(root, "old-gateway.secrets.json");
+        File.WriteAllText(oldProfile, "fixture-old-pairing"); File.WriteAllText(oldGateway, "fixture-old-gateway");
+        model.Settings.ProfilePath = oldProfile; model.Settings.GatewayTokenFile = oldGateway; model.SaveSettings();
+        typeof(ShellViewModel).GetProperty(nameof(ShellViewModel.Connected))!.SetValue(model, true);
+        Button settings = (Button)window.FindName("SettingsButton");
+        settings.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        ContextMenu settingsMenu = window.SettingsMenu!;
+        CapturePopup(settingsMenu, "settings-menu.png");
+        if (!settingsMenu.Items.OfType<MenuItem>().Select(item => item.Header).SequenceEqual(new[] { "连接向导", "更换板子／重新绑定" }))
+            throw new InvalidOperationException("Settings must separate connection guidance and board replacement.");
+        typeof(ShellViewModel).GetProperty(nameof(ShellViewModel.Busy))!.SetValue(model, true);
+        if (settingsMenu.Items.OfType<MenuItem>().Any(item => item.IsEnabled)) throw new InvalidOperationException("Settings actions must disable while work is running.");
+        typeof(ShellViewModel).GetProperty(nameof(ShellViewModel.Busy))!.SetValue(model, false);
+        settingsMenu.IsOpen = false;
+        SubmitReplacement(false);
+        settingsMenu.Items.OfType<MenuItem>().Last().RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        if (!model.Connected || model.Settings.ProfilePath != oldProfile || model.Settings.PairingId != "") throw new InvalidOperationException("Canceling replacement changed the active pairing.");
+        string workspace = model.Settings.Workspace; int conversations = model.Conversations.Count;
+        SubmitReplacement(true);
+        settingsMenu.Items.OfType<MenuItem>().Last().RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        if (model.Connected || model.Settings.ProfilePath == oldProfile || model.HasConnectionAttempted || model.Settings.Workspace != workspace || model.Conversations.Count != conversations)
+            throw new InvalidOperationException("Confirmed replacement did not reset only the connection.");
+        if (File.ReadAllText(oldProfile) != "fixture-old-pairing" || File.ReadAllText(oldGateway) != "fixture-old-gateway" || !File.Exists(userFile))
+            throw new InvalidOperationException("Replacement changed the previous pairing or user files.");
+
+        void SubmitReplacement(bool confirm)
+        {
+            Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, () =>
+            {
+                BoardReplacementWindow dialog = window.OwnedWindows.OfType<BoardReplacementWindow>().Single();
+                CaptureElement((FrameworkElement)dialog.Content, "board-replacement.png");
+                if (confirm)
+                {
+                    Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, () =>
+                    {
+                        ConnectionSetupWindow guide = window.OwnedWindows.OfType<ConnectionSetupWindow>().Single();
+                        CaptureElement((FrameworkElement)guide.Content, "board-replacement-guide.png");
+                        if (Descendants<Button>(guide).Single(b => Equals(b.Content, "使用已有配对连接")).IsEnabled || Descendants<PasswordBox>(guide).Single().Password.Length != 0)
+                            throw new InvalidOperationException("Replacement guide must not reuse the previous pairing or password.");
+                        guide.Close();
+                    });
+                    Descendants<Button>(dialog).Single(b => Equals(b.Content, "确认更换并继续")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                }
+                else dialog.DialogResult = false;
+            });
+        }
+
         Expander Group() => Descendants<Expander>(window).Single(e => e.Name == "WorkspaceGroup" && e.DataContext is ProjectGroup p && p.Path == project);
         ListBoxItem Row(Conversation conversation) => Descendants<ListBoxItem>(window).Single(row => ReferenceEquals(row.DataContext, conversation));
         void SubmitDialog(string? name)
@@ -122,7 +169,12 @@ public static class SidebarSmoke
             DispatcherFrame frame = new();
             Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, () => frame.Continue = false);
             Dispatcher.PushFrame(frame); menu.UpdateLayout();
-            RenderTargetBitmap bitmap = new((int)Math.Ceiling(menu.ActualWidth), (int)Math.Ceiling(menu.ActualHeight), 96, 96, PixelFormats.Pbgra32); bitmap.Render(menu);
+            CaptureElement(menu, name);
+        }
+        void CaptureElement(FrameworkElement element, string name)
+        {
+            element.UpdateLayout();
+            RenderTargetBitmap bitmap = new((int)Math.Ceiling(element.ActualWidth), (int)Math.Ceiling(element.ActualHeight), 96, 96, PixelFormats.Pbgra32); bitmap.Render(element);
             PngBitmapEncoder encoder = new(); encoder.Frames.Add(BitmapFrame.Create(bitmap));
             using FileStream output = File.Create(Path.Combine(destination, name)); encoder.Save(output);
         }

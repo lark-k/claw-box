@@ -253,6 +253,28 @@ public sealed class ShellViewModel : Observable, IDisposable
         Approvals.Clear(); Tasks.Clear();
         Status = "盒子已断开。已有配对保留，可重新连接。";
     }
+    public bool BeginBoardReplacement()
+    {
+        if (!CanManageChats || IsConnecting) { Status = "请先结束当前任务、处理待审批请求并停止连接，再更换板子。"; return false; }
+        string previousId = Settings.PairingId, previousProfile = Settings.ProfilePath, previousGateway = Settings.GatewayTokenFile;
+        string id = Guid.NewGuid().ToString("N");
+        string directory = BoardSetup.ReplacementDirectory(id);
+        Settings.PairingId = id;
+        Settings.ProfilePath = Path.Combine(directory, "connection.json");
+        Settings.GatewayTokenFile = Path.Combine(directory, "gateway.secrets.json");
+        try { state.Save("settings.json", Settings); }
+        catch
+        {
+            Settings.PairingId = previousId; Settings.ProfilePath = previousProfile; Settings.GatewayTokenFile = previousGateway;
+            throw;
+        }
+        Disconnect();
+        HasConnectionAttempted = false; ConnectionDevice = null;
+        inspectedDevice = null; inspectedChecks.Clear();
+        tracked.Clear(); completed.Clear(); originals.Clear();
+        Status = "已停止使用旧板配对。请按连接向导确认板子并重新绑定；聊天记录和工作区已保留。";
+        return true;
+    }
     public async Task Send()
     {
         if (!CanSend || string.IsNullOrWhiteSpace(Input)) return;
