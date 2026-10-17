@@ -114,12 +114,40 @@ public static class SidebarSmoke
         settings.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         ContextMenu settingsMenu = window.SettingsMenu!;
         CapturePopup(settingsMenu, "settings-menu.png");
-        if (!settingsMenu.Items.OfType<MenuItem>().Select(item => item.Header).SequenceEqual(new[] { "连接向导", "更换板子／重新绑定" }))
+        if (!settingsMenu.Items.OfType<MenuItem>().Select(item => item.Header).SequenceEqual(new[] { "有线连接", "无线连接", "更换板子／重新绑定" }))
             throw new InvalidOperationException("Settings must separate connection guidance and board replacement.");
         typeof(ShellViewModel).GetProperty(nameof(ShellViewModel.Busy))!.SetValue(model, true);
         if (settingsMenu.Items.OfType<MenuItem>().Any(item => item.IsEnabled)) throw new InvalidOperationException("Settings actions must disable while work is running.");
         typeof(ShellViewModel).GetProperty(nameof(ShellViewModel.Busy))!.SetValue(model, false);
         settingsMenu.IsOpen = false;
+        string previousMode = model.Settings.ConnectionMode;
+        model.Settings.ConnectionMode = "wireless";
+        typeof(ShellViewModel).GetProperty(nameof(ShellViewModel.Connected))!.SetValue(model, false);
+        model.Status = "未能通过当前网络连接原盒子。如果更换了 Wi-Fi，请为盒子设置新网络。";
+        Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, () =>
+        {
+            WirelessRecoveryWindow prompt = window.OwnedWindows.OfType<WirelessRecoveryWindow>().Single();
+            prompt.DialogResult = false;
+        });
+        window.ShowConnectionRecovery();
+        if (model.Settings.ProfilePath != oldProfile || File.ReadAllText(oldProfile) != "fixture-old-pairing")
+            throw new InvalidOperationException("Dismissing wireless recovery changed the pairing.");
+        Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, () =>
+        {
+            WirelessRecoveryWindow prompt = window.OwnedWindows.OfType<WirelessRecoveryWindow>().Single();
+            Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, () =>
+            {
+                WirelessConnectionWindow wireless = window.OwnedWindows.OfType<WirelessConnectionWindow>().Single();
+                wireless.Close();
+            });
+            Descendants<Button>(prompt).Single(b => Equals(b.Content, "设置 Wi-Fi")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        });
+        window.ShowConnectionRecovery();
+        typeof(ShellViewModel).GetProperty(nameof(ShellViewModel.ConnectionCanceled))!.SetValue(model, true);
+        window.ShowConnectionRecovery(); // Stopping a connection must not open another modal.
+        typeof(ShellViewModel).GetProperty(nameof(ShellViewModel.ConnectionCanceled))!.SetValue(model, false);
+        model.Settings.ConnectionMode = previousMode;
+        typeof(ShellViewModel).GetProperty(nameof(ShellViewModel.Connected))!.SetValue(model, true);
         SubmitReplacement(false);
         settingsMenu.Items.OfType<MenuItem>().Last().RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
         if (!model.Connected || model.Settings.ProfilePath != oldProfile || model.Settings.PairingId != "") throw new InvalidOperationException("Canceling replacement changed the active pairing.");
@@ -141,11 +169,16 @@ public static class SidebarSmoke
                 {
                     Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, () =>
                     {
-                        ConnectionSetupWindow guide = window.OwnedWindows.OfType<ConnectionSetupWindow>().Single();
-                        CaptureElement((FrameworkElement)guide.Content, "board-replacement-guide.png");
-                        if (Descendants<Button>(guide).Single(b => Equals(b.Content, "使用已有配对连接")).IsEnabled || Descendants<PasswordBox>(guide).Single().Password.Length != 0)
-                            throw new InvalidOperationException("Replacement guide must not reuse the previous pairing or password.");
-                        guide.Close();
+                        ConnectionMethodWindow chooser = window.OwnedWindows.OfType<ConnectionMethodWindow>().Single();
+                        Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, () =>
+                        {
+                            ConnectionSetupWindow guide = window.OwnedWindows.OfType<ConnectionSetupWindow>().Single();
+                            CaptureElement((FrameworkElement)guide.Content, "board-replacement-guide.png");
+                            if (Descendants<Button>(guide).Single(b => Equals(b.Content, "使用已有配对连接")).IsEnabled || Descendants<PasswordBox>(guide).Single().Password.Length != 0)
+                                throw new InvalidOperationException("Replacement guide must not reuse the previous pairing or password.");
+                            guide.Close();
+                        });
+                        Descendants<Button>(chooser).Single(b => Descendants<TextBlock>(b).Any(t => t.Text == "有线连接")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
                     });
                     Descendants<Button>(dialog).Single(b => Equals(b.Content, "确认更换并继续")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
                 }

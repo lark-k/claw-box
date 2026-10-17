@@ -226,7 +226,7 @@ public sealed class BoardSetup
     {
         if (string.IsNullOrEmpty(password)) throw new SetupException("identity", "请输入交付人员提供的设备首次登录密码。密码不会保存；后续连接使用专用密钥。");
     }
-    private string EnsureCredentials()
+    internal string EnsureCredentials()
     {
         string directory = Path.Combine(dataRoot, "executor");
         MakePrivate(directory);
@@ -249,7 +249,7 @@ public sealed class BoardSetup
         catch (Exception error) when (error is JsonException or KeyNotFoundException or InvalidOperationException)
         { throw new SetupException("local", "已有执行器凭据格式无效。请联系管理员修复，软件不会覆盖原文件。"); }
     }
-    private static async Task GenerateKey(string path, CancellationToken cancellation)
+    internal static async Task GenerateKey(string path, CancellationToken cancellation)
     {
         if (File.Exists(path))
         {
@@ -265,14 +265,14 @@ public sealed class BoardSetup
         await process.WaitForExitAsync(cancellation);
         if (process.ExitCode != 0) throw new SetupException("local", "专用密钥生成失败。请检查 Windows OpenSSH 安装和当前用户目录权限。");
     }
-    private static void MakePrivate(string path)
+    internal static void MakePrivate(string path)
     {
         for (string? current = Path.GetFullPath(path); current is not null; current = Path.GetDirectoryName(current))
             if ((Directory.Exists(current) || File.Exists(current)) && File.GetAttributes(current).HasFlag(FileAttributes.ReparsePoint))
                 throw new SetupException("local", "配对目录包含目录链接。请让管理员选择普通用户目录，避免凭据写入其他位置。");
         LocalState.MakePrivate(path);
     }
-    private static void RejectLinkedFile(string path)
+    internal static void RejectLinkedFile(string path)
     {
         if (File.Exists(path) && File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint))
             throw new SetupException("local", "配对或凭据文件包含文件链接。请让管理员修复，软件不会读取或覆盖链接目标。");
@@ -282,7 +282,7 @@ public sealed class BoardSetup
         using FileStream stream = new(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
         using StreamWriter writer = new(stream); writer.Write(text);
     }
-    private static void AtomicWrite(string path, string text)
+    internal static void AtomicWrite(string path, string text)
     {
         string stage = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try { WriteNew(stage, text); File.Move(stage, path, true); }

@@ -446,7 +446,7 @@
       "clawbox.executor": {
         "type": "Project",
         "dependencies": {
-          "ClawBox.Contracts": "[0.3.12, )",
+          "ClawBox.Contracts": "[0.3.23, )",
           "DocumentFormat.OpenXml": "[3.5.1, )",
           "Microsoft.Data.Sqlite": "[10.0.12, )"
         }

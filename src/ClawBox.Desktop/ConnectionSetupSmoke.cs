@@ -75,6 +75,25 @@ public static class ConnectionSetupSmoke
         if (session.Connected || !Descendants<TextBlock>(window).Any(t => t.Text == "已断开")) throw new InvalidOperationException("Disconnect did not synchronize the guide.");
         window.Close();
         Directory.Delete(sessionRoot, true);
+        ConnectionMethodWindow choice = new(); choice.Show(); Capture("connection-method.png", choice); choice.Close();
+        WirelessRecoveryWindow recovery = new("未能通过当前网络连接原盒子。如果更换了 Wi-Fi，请为盒子设置新网络。");
+        recovery.Show(); Capture("wireless-recovery.png", recovery);
+        if (!Descendants<Button>(recovery).Any(b => Equals(b.Content, "设置 Wi-Fi")) ||
+            !Descendants<Button>(recovery).Any(b => b.IsCancel && Equals(b.Content, "暂不连接")))
+            throw new InvalidOperationException("Wireless recovery must offer explicit setup and cancellation.");
+        recovery.Close();
+        WirelessConnectionWindow wireless = new(settings, _ => throw new InvalidOperationException("Preview cannot connect"), () => { }, preview: true);
+        wireless.Show();
+        foreach (string stage in new[] { "devices", "network", "ready" })
+        {
+            wireless.Preview(stage); Capture("wireless-" + stage + ".png", wireless);
+            if (stage == "network")
+            {
+                wireless.Width = 640; wireless.Height = 570; Capture("wireless-network-compact.png", wireless);
+                wireless.Width = 740; wireless.Height = 690;
+            }
+        }
+        wireless.Width = 640; wireless.Height = 570; Capture("wireless-compact.png", wireless); wireless.Close();
         void Capture(string name, Window? target = null)
         {
             DispatcherFrame frame = new(); Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, () => frame.Continue = false); Dispatcher.PushFrame(frame);

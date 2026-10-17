@@ -1,0 +1,36 @@
+[Unit]
+Description=ClawBox Bluetooth Wi-Fi provisioning and offline network maintenance
+After=bluetooth.service NetworkManager.service
+Requires=bluetooth.service NetworkManager.service
+PartOf=bluetooth.service NetworkManager.service
+StartLimitIntervalSec=120
+StartLimitBurst=12
+
+[Service]
+Type=notify
+NotifyAccess=main
+TimeoutStartSec=20
+TimeoutStopSec=55
+User=root
+WorkingDirectory=/opt/clawbox-network
+ExecStart=/usr/bin/python3 -B -m clawbox_network.ble
+Restart=on-failure
+RestartSec=5
+UMask=0077
+StateDirectory=clawbox-network
+StateDirectoryMode=0700
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/root/.ssh /root/.openclaw /var/lib/clawbox-network
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX
+LockPersonality=true
+MemoryMax=128M
+TasksMax=16
+
+[Install]
+WantedBy=multi-user.target

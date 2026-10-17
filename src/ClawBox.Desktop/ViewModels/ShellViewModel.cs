@@ -21,9 +21,11 @@ public sealed class ShellViewModel : Observable, IDisposable
     private readonly Dictionary<string, FileChanges.Snapshot> originals = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, ProjectGroup> projectGroups = new(StringComparer.OrdinalIgnoreCase);
     private readonly RuntimeSession runtime = new();
+    private readonly WirelessReconnect wirelessReconnect;
     private int connectionRevision;
     private CancellationTokenSource? connecting;
     public bool IsConnecting => connecting is not null;
+    public bool ConnectionCanceled { get; private set; }
     public string ConnectionButtonLabel => IsConnecting ? "停止连接" : Connected ? "断开连接" : "连接盒子";
     public void CancelConnection() => connecting?.Cancel();
     public bool HasConnectionAttempted { get; private set; }
@@ -106,9 +108,10 @@ public sealed class ShellViewModel : Observable, IDisposable
     }
     public string Title => Selected.Title;
     public string WorkspacePath => Settings.Workspace;
-    public ShellViewModel(LocalState state)
+    public ShellViewModel(LocalState state, WirelessReconnect? wirelessReconnect = null)
     {
         this.state = state;
+        this.wirelessReconnect = wirelessReconnect ?? new();
         store = new(state);
         Settings = state.Load("settings.json", () => new DesktopSettings());
         if (Settings.AccessMode is not ("approval" or "readOnly" or "fullAccess")) Settings.AccessMode = "approval";
@@ -219,11 +222,13 @@ public sealed class ShellViewModel : Observable, IDisposable
         state.Save("settings.json", Settings);
         Changed(nameof(WorkspacePath));
     }
+    internal void PersistSettings() => state.Save("settings.json", Settings);
     public async Task Connect(CancellationToken cancellation = default)
     {
         if (Busy) return;
         connectionRevision++;
         HasConnectionAttempted = true;
+        ConnectionCanceled = false;
         using CancellationTokenSource attempt = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
         connecting = attempt; Changed(nameof(IsConnecting)); Changed(nameof(ConnectionButtonLabel));
         automatic.StartSession(DateTimeOffset.UtcNow);
@@ -231,15 +236,21 @@ public sealed class ShellViewModel : Observable, IDisposable
         Status = "正在连接盒子…";
         try
         {
+            if (await wirelessReconnect.Resolve(Settings, attempt.Token, message => Status = message)) PersistSettings();
             BoardConnectionProfile profile = BoardConnectionProfile.Load(Settings.ProfilePath);
             ConnectionDevice = new(profile.BoxHost, profile.SshPort, profile.HostKeyFingerprint);
             await runtime.Start(Settings, attempt.Token, message => Status = message);
-            Connected = true; Status = "盒子已连接"; timer.Start();
+            Connected = true; Status = Settings.ConnectionMode == "wireless" ? "盒子已连接 · 无线" : "盒子已连接 · 有线"; timer.Start();
             Changed(nameof(CanSend));
         }
-        catch (Exception error) when (error is IOException or InvalidOperationException or JsonException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
-        { Status = error.Message; }
-        catch (OperationCanceledException) { Status = "连接已停止，请检查网络后重试。"; }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            ConnectionCanceled = attempt.IsCancellationRequested;
+            Status = ConnectionCanceled ? "连接已停止，请检查网络后重试。"
+                : error is OperationCanceledException ? "连接超时，请检查盒子电源和网络；更换 Wi-Fi 后请为盒子设置新网络。"
+                : error is SetupException or IOException or InvalidOperationException or JsonException or UnauthorizedAccessException or System.ComponentModel.Win32Exception ? error.Message
+                : "连接未完成，请检查盒子电源、电脑蓝牙和网络。若更换了 Wi-Fi，请为盒子设置新网络。已有配对会保留。";
+        }
         finally { connecting = null; Changed(nameof(IsConnecting)); Changed(nameof(ConnectionButtonLabel)); Busy = false; }
     }
     public void Disconnect()

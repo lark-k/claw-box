@@ -53,11 +53,20 @@ appsettings.Local.json
 *.p12
 *.jks
 **/known_hosts
+**/known_hosts.*
 **/tunnel_ed25519
 **/tunnel_ed25519.pub
+**/tunnel_ed25519.*
 **/worker-token
+**/worker-token.*
 **/id_ed25519
+**/id_ed25519.*
 **/id_rsa
+**/id_rsa.*
+# Board ownership records and NetworkManager exports can contain private credentials.
+**/authorized_keys
+**/authorized_keys.*
+*.nmconnection
 packages/
 Thumbs.db
 .DS_Store

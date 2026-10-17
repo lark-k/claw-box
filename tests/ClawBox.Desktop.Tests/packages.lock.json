@@ -1,7 +1,7 @@
 {
   "version": 2,
   "dependencies": {
-    "net10.0-windows7.0": {
+    "net10.0-windows10.0.19041": {
       "Microsoft.NET.Test.Sdk": {
         "type": "Direct",
         "requested": "[18.10.1, )",
@@ -28,11 +28,6 @@
         "requested": "[4.0.1, )",
         "resolved": "4.0.1",
         "contentHash": "8CoAaZkniVekR1ycJyxn+hOz+6ZQCDPcoIsIs6ujd4WyFcBMlxGNU15Qb8Uxd4iO4UmOuETb0M6vzBbwX/mfLA=="
-      },
-      "BouncyCastle.Cryptography": {
-        "type": "Transitive",
-        "resolved": "2.7.0",
-        "contentHash": "U+12df8UEWHgBi04YVf/Lgi2dy3SItlIYvHjjEVa/BngCQIzDCDRBk50DDByCfDvSbe5pRNFr3b7UrVK2kMcLw=="
       },
       "Microsoft.CodeCoverage": {
         "type": "Transitive",
@@ -111,9 +106,16 @@
       "QuantumHarness": {
         "type": "Project",
         "dependencies": {
-          "ClawBox.Contracts": "[0.3.12, )",
+          "BouncyCastle.Cryptography": "[2.7.0, )",
+          "ClawBox.Contracts": "[0.3.23, )",
           "SSH.NET": "[2026.0.0, )"
         }
+      },
+      "BouncyCastle.Cryptography": {
+        "type": "CentralTransitive",
+        "requested": "[2.7.0, )",
+        "resolved": "2.7.0",
+        "contentHash": "U+12df8UEWHgBi04YVf/Lgi2dy3SItlIYvHjjEVa/BngCQIzDCDRBk50DDByCfDvSbe5pRNFr3b7UrVK2kMcLw=="
       },
       "SSH.NET": {
         "type": "CentralTransitive",
@@ -126,7 +128,7 @@
         }
       }
     },
-    "net10.0-windows7.0/win-arm64": {},
-    "net10.0-windows7.0/win-x64": {}
+    "net10.0-windows10.0.19041/win-arm64": {},
+    "net10.0-windows10.0.19041/win-x64": {}
   }
 }

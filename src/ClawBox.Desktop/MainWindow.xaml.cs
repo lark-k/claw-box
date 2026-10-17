@@ -7,6 +7,8 @@ using System.Windows.Threading;
 using ClawBox.Desktop.ViewModels;
 using Microsoft.Win32;
 
+using ClawBox.Desktop.Services;
+
 namespace ClawBox.Desktop;
 
 public partial class MainWindow : Window
@@ -18,6 +20,7 @@ public partial class MainWindow : Window
     private bool syncingSelection;
     private bool followLatest = true;
     private bool latestQueued;
+    private bool closed;
     internal ContextMenu? SidebarMenu { get; private set; }
     internal ContextMenu? SettingsMenu { get; private set; }
     public MainWindow(ShellViewModel model, bool preview = false)
@@ -50,11 +53,11 @@ public partial class MainWindow : Window
         if (preview || startupAttempted) return;
         startupAttempted = true;
         if (await TryConnectOnStartup(Model.Settings, async () => { await Model.Connect(); return Model.Connected; })) return;
-        ShowConnectionGuide();
+        ShowConnectionRecovery();
     }
     internal static async Task<bool> TryConnectOnStartup(ClawBox.Desktop.Models.DesktopSettings settings, Func<Task<bool>> connect)
         => File.Exists(settings.ProfilePath) && File.Exists(settings.GatewayTokenFile) && await connect();
-    private void Window_Closing(object? sender, CancelEventArgs e) => Model.Dispose();
+    private void Window_Closing(object? sender, CancelEventArgs e) { closed = true; Model.Dispose(); }
     private void Window_SizeChanged(object sender, SizeChangedEventArgs e)
     {
         if (SidebarColumn is not null) SidebarColumn.Width = new GridLength(ActualWidth >= 1700 ? 290 : 250);
@@ -238,7 +241,7 @@ public partial class MainWindow : Window
         if (Model.Connected) { Model.Disconnect(); return; }
         if (Model.Busy) { Model.Status = "当前任务正在进行，请先停止任务再连接。"; return; }
         if (File.Exists(Model.Settings.ProfilePath) && File.Exists(Model.Settings.GatewayTokenFile)) await Model.Connect();
-        if (!Model.Connected) ShowConnectionGuide();
+        if (!Model.Connected) ShowConnectionRecovery();
     }
     private async void Send_Click(object sender, RoutedEventArgs e) => await Model.Send();
     private async void Stop_Click(object sender, RoutedEventArgs e) => await Model.Stop();
@@ -316,7 +319,7 @@ public partial class MainWindow : Window
         if (!Model.Connected && !Model.Busy) await Model.Connect();
     }
     private void Help_Click(object sender, RoutedEventArgs e) => MessageBox.Show(this,
-        "1. 保持盒子电源、网线与网络共享开启。\n2. 首次使用或连接失败时，按连接引导中的检测结果操作；也可从连接与设置重新打开引导。\n3. 选择文件并输入任务，Ctrl+Enter 发送。\n4. 查看审批卡片的完整参数，再批准或拒绝。\n5. 核对执行记录与结果文件。\n\n选择工作区外的文件时会复制到工作区，原文件保持不变。",
+        "1. 给盒子接通电源，从设置选择有线连接或无线连接。\n2. 有线连接按引导检查网线和网络共享；无线连接通过蓝牙选择盒子、设置 Wi-Fi。出差换网仍使用无线连接，沿用原配对。更换设备时才使用更换板子／重新绑定。\n3. 选择文件并输入任务，Ctrl+Enter 发送。\n4. 查看审批卡片的完整参数，再批准或拒绝。\n5. 核对执行记录与结果文件。\n\n选择工作区外的文件时会复制到工作区，原文件保持不变。",
         "Quantum Harness 使用帮助", MessageBoxButton.OK, MessageBoxImage.Information);
     private void Settings_Click(object sender, RoutedEventArgs e)
     {
@@ -325,20 +328,22 @@ public partial class MainWindow : Window
     internal void OpenSettingsMenu(FrameworkElement target)
     {
         ContextMenu menu = new() { PlacementTarget = target, Placement = System.Windows.Controls.Primitives.PlacementMode.Right };
-        MenuItem guide = new() { Header = "连接向导", ToolTip = "检查网络、断开或重连当前板子，保留已有配对。" };
+        MenuItem guide = new() { Header = "有线连接", ToolTip = "网线直连：检查以太网、网络共享，沿用已有配对。" };
+        MenuItem wireless = new() { Header = "无线连接", ToolTip = "蓝牙配网、出差更换 Wi-Fi，或通过无线地址重连原盒子。" };
         MenuItem replace = new() { Header = "更换板子／重新绑定", ToolTip = "停止使用旧配对，为新板或当前板子重新绑定；保留聊天和工作区。" };
-        foreach (MenuItem item in new[] { guide, replace })
+        foreach (MenuItem item in new[] { guide, wireless, replace })
         {
             item.SetBinding(IsEnabledProperty, new System.Windows.Data.Binding(nameof(Model.CanManageChats)) { Source = Model });
             ToolTipService.SetShowOnDisabled(item, true);
         }
-        guide.Click += (_, _) => ShowConnectionGuide();
+        guide.Click += (_, _) => ShowWiredGuide();
+        wireless.Click += (_, _) => ShowWirelessGuide();
         replace.Click += (_, _) =>
         {
             if (!ConfirmBoardReplacement(() => new BoardReplacementWindow { Owner = this }.ShowDialog() == true)) return;
             ShowConnectionGuide();
         };
-        menu.Items.Add(guide); menu.Items.Add(new Separator()); menu.Items.Add(replace);
+        menu.Items.Add(guide); menu.Items.Add(wireless); menu.Items.Add(new Separator()); menu.Items.Add(replace);
         SettingsMenu = menu; menu.IsOpen = true;
     }
     internal bool ConfirmBoardReplacement(Func<bool> confirm)
@@ -355,13 +360,48 @@ public partial class MainWindow : Window
     }
     private void ShowConnectionGuide()
     {
+        if (!Model.CanManageChats || Model.IsConnecting) return;
+        if (Model.Settings.ConnectionMode == "wireless") { ShowWirelessGuide(); return; }
+        ConnectionMethodWindow chooser = new() { Owner = this };
+        if (chooser.ShowDialog() != true) return;
+        if (chooser.Wireless) ShowWirelessGuide(); else ShowWiredGuide();
+    }
+    internal void ShowConnectionRecovery()
+    {
+        if (closed || Model.ConnectionCanceled || !Model.CanManageChats || Model.IsConnecting) return;
+        if (Model.Settings.ConnectionMode == "wireless" && File.Exists(Model.Settings.ProfilePath) && File.Exists(Model.Settings.GatewayTokenFile))
+        {
+            if (new WirelessRecoveryWindow(Model.Status) { Owner = this }.ShowDialog() == true) ShowWirelessGuide();
+            return;
+        }
+        ShowConnectionGuide();
+    }
+    private void ShowWirelessGuide()
+    {
+        if (!Model.CanManageChats || Model.IsConnecting) return;
+        new WirelessConnectionWindow(Model.Settings, async cancellation =>
+        {
+            Model.SaveSettings(); await Model.Connect(cancellation);
+            return Model.Connected ? null : Model.Status;
+        }, Model.SaveSettings, preview)
+        { Owner = this }.ShowDialog();
+    }
+    private void ShowWiredGuide()
+    {
         if (!Model.CanManageChats) return;
         ConnectionSetupWindow guide = new(Model.Settings, async cancellation =>
         {
             Model.SaveSettings();
             await Model.Connect(cancellation);
+            if (Model.Connected)
+            {
+                BoardConnectionProfile profile = BoardConnectionProfile.Load(Model.Settings.ProfilePath);
+                Model.Settings.ConnectionMode = "wired"; Model.Settings.WiredHost = profile.BoxHost; Model.Settings.WiredPort = profile.SshPort;
+                Model.PersistSettings();
+            }
             return Model.Connected ? null : Model.Status;
-        }, preview: preview, saveConfiguration: Model.SaveSettings, session: Model)
+        }, preview: preview, saveConfiguration: Model.SaveSettings, session: Model.Settings.ConnectionMode == "wired" ? Model : null,
+            initialHost: Model.Settings.ConnectionMode == "wireless" ? Model.Settings.WiredHost : null, initialPort: Model.Settings.WiredPort)
         { Owner = this };
         guide.ShowDialog();
     }

@@ -17,7 +17,7 @@ public sealed class BoardReplacementWindow : Window
         panel.Children.Add(new TextBlock { Text = "更换板子／重新绑定", FontSize = 23, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 16) });
         panel.Children.Add(new TextBlock
         {
-            Text = "用于换一块板子，或为当前板子重新建立配对。\n如果只是网络变化、暂时断线或检查连接，请取消并使用“连接向导”。",
+            Text = "用于换一块板子，或为当前板子重新建立配对。\n如果只是网络变化或暂时断线，请取消并使用设置中的“有线连接”或“无线连接”。",
             TextWrapping = TextWrapping.Wrap,
             LineHeight = 24,
             Margin = new Thickness(0, 0, 0, 16)
@@ -29,7 +29,7 @@ public sealed class BoardReplacementWindow : Window
             Padding = new Thickness(16),
             Child = new TextBlock
             {
-                Text = "确认后将断开当前连接，停止使用旧设备配对。\n聊天记录、工作区和电脑上的文件都会保留。\n\n接下来按连接向导填写设备地址、SSH 端口和登录密码，确认设备后绑定。无需手工删除文件或生成密钥。",
+                Text = "确认后将断开当前连接，停止使用旧设备配对。\n聊天记录、工作区和电脑上的文件都会保留。\n\n接下来选择有线或无线连接方式，确认自己的盒子后绑定。无需手工删除文件或生成密钥。",
                 TextWrapping = TextWrapping.Wrap,
                 LineHeight = 24
             }

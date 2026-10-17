@@ -57,18 +57,19 @@ public sealed class ConnectionSetupWindow : Window
     private bool networkChecksEnabled;
     private bool loginVerified, diagnoseAgain;
     private string failedStep = "";
-    public ConnectionSetupWindow(DesktopSettings settings, Func<CancellationToken, Task<string?>> connect, bool preview = false, Action? saveConfiguration = null, ShellViewModel? session = null)
+    public ConnectionSetupWindow(DesktopSettings settings, Func<CancellationToken, Task<string?>> connect, bool preview = false, Action? saveConfiguration = null, ShellViewModel? session = null, string? initialHost = null, int initialPort = 22)
     {
         this.settings = settings; this.connect = connect; this.saveConfiguration = saveConfiguration; isPreview = preview; this.session = session;
         setup = new(pairingId: settings.PairingId);
-        Title = "Quantum Harness · 连接引导"; Width = 890; Height = 790; MinWidth = 760; MinHeight = 580;
+        Title = "Quantum Harness · 有线连接"; Width = 890; Height = 790; MinWidth = 760; MinHeight = 580;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
         FontFamily = new("Microsoft YaHei UI"); FontSize = 14; Background = Brushes.White;
         if (!preview) { Width = Math.Min(Width, SystemParameters.WorkArea.Width - 24); Height = Math.Min(Height, SystemParameters.WorkArea.Height - 24); }
         LoadExisting();
+        if (initialHost is not null) { host.Text = initialHost; port.Text = initialPort.ToString(); }
         DockPanel root = new(); Content = new Border { Background = Brushes.White, Padding = new Thickness(28), Child = root };
         StackPanel heading = new(); DockPanel.SetDock(heading, Dock.Top); root.Children.Add(heading);
-        heading.Children.Add(new TextBlock { Text = preview ? "连接你的板子 · 界面预览" : "连接你的板子", FontSize = 27, FontWeight = FontWeights.SemiBold });
+        heading.Children.Add(new TextBlock { Text = preview ? "有线连接 · 界面预览" : "有线连接", FontSize = 27, FontWeight = FontWeights.SemiBold });
         heading.Children.Add(introduction);
         StackPanel footer = new(); DockPanel.SetDock(footer, Dock.Bottom); root.Children.Add(footer);
         footer.Children.Add(summary);

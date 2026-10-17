@@ -1,0 +1,2 @@
+# Host-side protocol tests; deployed boards use Debian's python3-cryptography package.
+cryptography==50.0.2

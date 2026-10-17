@@ -27,6 +27,9 @@ foreach ($name in @('connection-guide-waiting.png','connection-guide-missing.png
     try { if ($bitmap.Width -lt 700 -or $bitmap.Height -lt 450) { throw 'Invalid connection guide rendering.' } } finally { $bitmap.Dispose() }
 }
 if (-not (Test-Path -LiteralPath (Join-Path $destination 'board-replacement.png'))) { throw 'Board replacement confirmation did not render.' }
+foreach ($name in @('connection-method.png','wireless-recovery.png','wireless-devices.png','wireless-network.png','wireless-network-compact.png','wireless-ready.png','wireless-compact.png')) {
+    if (-not (Test-Path -LiteralPath (Join-Path $destination $name))) { throw 'Wireless guide did not render.' }
+}
 foreach ($name in @('ethernet-ip-settings.png','connection-import.png')) {
     $bitmap=[Drawing.Bitmap]::new((Join-Path $destination $name))
     try { if ($bitmap.Width -lt 550 -or $bitmap.Height -lt 300) { throw 'Invalid connection settings popup rendering.' } } finally { $bitmap.Dispose() }

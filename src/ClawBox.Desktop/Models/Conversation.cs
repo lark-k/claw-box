@@ -66,6 +66,11 @@ public sealed class DesktopSettings
     public List<string> Projects { get; set; } = [];
     public string AccessMode { get; set; } = "approval";
     public string PairingId { get; set; } = "";
+    public string ConnectionMode { get; set; } = "wired";
+    public string WiredHost { get; set; } = "192.168.137.2";
+    public int WiredPort { get; set; } = 22;
+    public string WirelessHost { get; set; } = "";
+    public int WirelessPort { get; set; } = 22;
     public string Workspace { get; set; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ClawBox", "workspace");
     public string ProfilePath { get; set; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ClawBox", "connections", "192.168.137.2-22", "connection.json");
     public string GatewayTokenFile { get; set; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ClawBox", "desktop", "gateway.secrets.json");

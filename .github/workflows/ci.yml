@@ -35,6 +35,8 @@ jobs:
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: '3.13.6'
+      - name: Install board protocol test dependency
+        run: python -m pip install -r tests/ClawBox.Board.Tests/requirements.txt
       - name: Restore, build, test and formatting
         shell: pwsh
         run: ./scripts/ci/Verify.ps1
