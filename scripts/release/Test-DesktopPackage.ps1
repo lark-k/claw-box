@@ -1,5 +1,5 @@
 #requires -Version 7.4
-param([Parameter(Mandatory)][string]$Path,[ValidateSet('win-x64','win-arm64')][string]$Runtime='win-x64')
+param([Parameter(Mandatory)][string]$Path,[ValidateSet('win-x64','win-arm64')][string]$Runtime='win-x64',[switch]$LegacyWindows)
 $ErrorActionPreference='Stop'
 $Path=[IO.Path]::GetFullPath($Path)
 foreach ($required in @('QuantumHarness.exe','QuantumHarness.dll','QuantumHarness.runtimeconfig.json','hostfxr.dll','coreclr.dll','PresentationFramework.dll','executor/ClawBox.Executor.exe','desktop-manifest.json')) {
@@ -9,6 +9,15 @@ $files=@(Get-ChildItem -LiteralPath $Path -File -Recurse)
 if ($files | Where-Object { $_.Name -match '(?i)\.secrets\.json$|^(connection|settings|conversations)\.json$|^appsettings\..+\.json$|\.(sqlite|db|docx|log|pem|key|pfx)$|^known_hosts$|^tunnel_ed25519|^\.env($|\.)' }) { throw 'Private/runtime data found in application package.' }
 $manifest=Get-Content -LiteralPath (Join-Path $Path 'desktop-manifest.json') -Raw | ConvertFrom-Json
 if ($manifest.runtime -cne $Runtime -or $manifest.product -cne 'Quantum Harness') { throw 'Wrong package identity.' }
+$flavor = if ($LegacyWindows) { 'legacy' } else { 'standard' }
+if ($manifest.windowsCompatibility -and $manifest.windowsCompatibility -cne $flavor) { throw 'Wrong Windows compatibility package.' }
+if ($LegacyWindows -and ($Runtime -ne 'win-x64' -or $manifest.windowsCompatibility -cne 'legacy')) { throw 'Legacy Windows requires an explicitly marked win-x64 package.' }
+if ($Runtime -eq 'win-x64') {
+    foreach ($apphost in @('QuantumHarness.exe','executor/ClawBox.Executor.exe')) {
+        $cet = & (Join-Path $PSScriptRoot 'Get-CetCompatibility.ps1') -Path (Join-Path $Path $apphost)
+        if ($cet -eq [bool]$LegacyWindows) { throw "Unexpected CET flag in $apphost ($flavor package)." }
+    }
+}
 if ($files.Count -ne $manifest.files.Count+1) { throw 'Unexpected files in package.' }
 $seen=@{}
 foreach ($file in $manifest.files) {

@@ -46,6 +46,20 @@ jobs:
       - name: Verify desktop portable package and render states
         shell: pwsh
         run: ./scripts/ci/Test-DesktopPublish.ps1
+      - name: Build and verify desktop installer lifecycle
+        shell: pwsh
+        run: |
+          ./scripts/release/Publish-Installer.ps1 -PackagePath ./artifacts/publish/QuantumHarness/win-x64
+          $version = ([xml](Get-Content Directory.Build.props -Raw)).Project.PropertyGroup.Version
+          ./tests/ClawBox.Installer.Tests/Test-Installer.ps1 -InstallerPath "${PWD}/artifacts/releases/installers/QuantumHarness-$version-win-x64-Setup.exe"
+      - name: Verify legacy Windows desktop and executor packages
+        shell: pwsh
+        run: |
+          ./scripts/ci/Test-DesktopPublish.ps1 -LegacyWindows
+          ./scripts/ci/Test-Publish.ps1 -PackagePath ./artifacts/publish/QuantumHarness/win-x64-legacy/executor
+          ./scripts/release/Publish-Installer.ps1 -PackagePath ./artifacts/publish/QuantumHarness/win-x64-legacy -LegacyWindows
+          $version = ([xml](Get-Content Directory.Build.props -Raw)).Project.PropertyGroup.Version
+          ./tests/ClawBox.Installer.Tests/Test-Installer.ps1 -InstallerPath "${PWD}/artifacts/releases/installers/QuantumHarness-$version-win-x64-legacy-Setup.exe" -LegacyWindows
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -55,4 +69,6 @@ jobs:
             artifacts/test-results/
             artifacts/publish/
             artifacts/desktop-qa/
+            artifacts/releases/installers/
+            artifacts/installer-qa/
           retention-days: 14

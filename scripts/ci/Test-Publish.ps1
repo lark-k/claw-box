@@ -1,22 +1,23 @@
 #requires -Version 7.4
 [CmdletBinding()]
-param([ValidateSet('win-x64','win-arm64')][string]$Runtime = 'win-x64')
+param([ValidateSet('win-x64','win-arm64')][string]$Runtime = 'win-x64', [string]$PackagePath)
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $project = Join-Path $repoRoot 'src\ClawBox.Executor'
 $fixtures = @((Join-Path $project 'appsettings.Local.json'), (Join-Path $project 'publish-test.secrets.json'))
-foreach ($fixture in $fixtures) {
+foreach ($fixture in $(if ($PackagePath) { @() } else { $fixtures })) {
     if (Test-Path -LiteralPath $fixture) { throw 'Refusing to replace an existing developer configuration for the publish test.' }
 }
 $created = @()
 $process = $null
 $testRoot = Join-Path $env:LOCALAPPDATA ('ClawBox\tests\' + [guid]::NewGuid().ToString('N'))
 try {
-    foreach ($fixture in $fixtures) {
+    foreach ($fixture in $(if ($PackagePath) { @() } else { $fixtures })) {
         '{"publishExclusionSentinel":true}' | Set-Content -LiteralPath $fixture -Encoding utf8
         $created += $fixture
     }
-    & (Join-Path $repoRoot 'scripts\release\Publish.ps1') -Runtime $Runtime
+    if (-not $PackagePath) { & (Join-Path $repoRoot 'scripts\release\Publish.ps1') -Runtime $Runtime }
+    else { & (Join-Path $repoRoot 'scripts/release/Test-Package.ps1') -Path $PackagePath -Runtime $Runtime }
     if ($Runtime -ne 'win-x64' -or [Runtime.InteropServices.RuntimeInformation]::OSArchitecture -ne 'X64') {
         Write-Host 'Package structure verified; runtime smoke test requires an x64 Windows host.'
         return
@@ -31,7 +32,7 @@ try {
     $listener.Start()
     $port = $listener.LocalEndpoint.Port
     $listener.Stop()
-    $package = Join-Path $repoRoot 'artifacts\publish\win-x64'
+    $package = if ($PackagePath) { [IO.Path]::GetFullPath($PackagePath) } else { Join-Path $repoRoot 'artifacts\publish\win-x64' }
     $info = [Diagnostics.ProcessStartInfo]::new((Join-Path $package 'ClawBox.Executor.exe'))
     $info.WorkingDirectory = $package
     $info.UseShellExecute = $false

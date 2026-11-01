@@ -16,6 +16,8 @@ SDK 私有安装在用户目录，global.json 固定功能带并允许补丁。C
 
 ## 发布
 
+Quantum Harness 用户安装版从 0.3.27 开始提供：运行 `scripts/release/Publish-Installer.ps1` 生成中文用户级安装器，支持卸载和保留数据的覆盖升级。构建、验证和限制见[桌面安装程序](desktop-installer.md)。安装版没有应用内更新，用户数据位置不变；发布产物当前未签名。
+
 运行 Publish.ps1 生成 win-x64/win-arm64 自包含目录。发布前完成 Verify.ps1，使用干净提交和版本标签。产物目录不包含 token 或个人工作文档。首版目录发布不等于已签名安装包；代码签名证书、安装程序和回滚需要后续发布流水线。
 
 发布先写入 `artifacts/releases/staging/`，验证 PE 头、运行时 JSON、私密文件排除和 SHA-256 清单后才更新 `artifacts/publish/<架构>/`。前一份目录移至 `artifacts/releases/previous/`；失败的临时目录保留以便排查。以上目录均被 Git 忽略，可由维护者定期清理。

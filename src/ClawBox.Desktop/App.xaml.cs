@@ -11,6 +11,12 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        if (e.Args.Length == 2 && e.Args[0] == "--startup-smoke")
+        {
+            StartupSmoke.Run(e.Args[1]);
+            Shutdown();
+            return;
+        }
         if (e.Args.Length == 2 && e.Args[0] == "--connection-check")
         {
             Shutdown(ConnectionCheck.Run(e.Args[1]));
@@ -24,6 +30,12 @@ public partial class App : Application
         }
         singleInstance = new Mutex(true, @"Local\QuantumHarness-" + Environment.UserName, out bool created);
         if (!created) { MessageBox.Show("Quantum Harness 已在运行。", "Quantum Harness"); Shutdown(); return; }
+        if (Mutex.TryOpenExisting(@"Local\QuantumHarness-Maintenance-" + Environment.UserName, out Mutex? maintenance))
+        {
+            maintenance.Dispose();
+            MessageBox.Show("Quantum Harness 正在安装或卸载，请完成后再启动。", "Quantum Harness");
+            Shutdown(); return;
+        }
         try
         {
             ShellViewModel model = new(new LocalState());

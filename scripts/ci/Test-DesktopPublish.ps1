@@ -1,13 +1,20 @@
 #requires -Version 7.4
 [CmdletBinding()]
-param([switch]$SkipPublish, [switch]$SideBySide)
+param([switch]$SkipPublish, [switch]$SideBySide, [switch]$LegacyWindows)
 $ErrorActionPreference='Stop'
 $repoRoot=Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
-if (-not $SkipPublish) { & (Join-Path $repoRoot 'scripts/release/Publish-Desktop.ps1') -Runtime win-x64 -SideBySide:$SideBySide }
+if (-not $SkipPublish) { & (Join-Path $repoRoot 'scripts/release/Publish-Desktop.ps1') -Runtime win-x64 -SideBySide:$SideBySide -LegacyWindows:$LegacyWindows }
 $version = ([xml](Get-Content (Join-Path $repoRoot 'Directory.Build.props') -Raw)).Project.PropertyGroup.Version
-$package=if ($SideBySide) { Join-Path $repoRoot "artifacts/publish/QuantumHarness/$version/win-x64" } else { Join-Path $repoRoot 'artifacts/publish/QuantumHarness/win-x64' }
-& (Join-Path $repoRoot 'scripts/release/Test-DesktopPackage.ps1') -Path $package -Runtime win-x64
+$distribution = if ($LegacyWindows) { 'win-x64-legacy' } else { 'win-x64' }
+$package=if ($SideBySide) { Join-Path $repoRoot "artifacts/publish/QuantumHarness/$version/$distribution" } else { Join-Path $repoRoot "artifacts/publish/QuantumHarness/$distribution" }
+& (Join-Path $repoRoot 'scripts/release/Test-DesktopPackage.ps1') -Path $package -Runtime win-x64 -LegacyWindows:$LegacyWindows
 $destination=Join-Path $repoRoot ('artifacts/desktop-qa/publish-'+[guid]::NewGuid().ToString('N'))
+$startupDestination = Join-Path $destination 'fresh-startup'
+$startupProcess = Start-Process -FilePath (Join-Path $package 'QuantumHarness.exe') -ArgumentList @('--startup-smoke',('"'+$startupDestination+'"')) -WindowStyle Hidden -PassThru
+if (-not $startupProcess.WaitForExit(30000)) { $startupProcess.Kill(); throw 'Fresh startup timed out.' }
+if ($startupProcess.ExitCode -ne 0 -or -not (Test-Path (Join-Path $startupDestination 'startup.json'))) { throw 'Fresh home screen did not start.' }
+$startup = Get-Content -LiteralPath (Join-Path $startupDestination 'startup.json') -Raw | ConvertFrom-Json
+if ($startup.mainWindow -ne $true -or $startup.connectionChooser -ne $false -or $startup.connected -ne $false) { throw 'Fresh startup must remain on the home screen without connection dialogs.' }
 $process=Start-Process -FilePath (Join-Path $package 'QuantumHarness.exe') -ArgumentList @('--visual-smoke',('"'+$destination+'"')) -WindowStyle Hidden -PassThru
 if (-not $process.WaitForExit(60000)) { $process.Kill(); throw 'Desktop visual smoke timed out.' }
 if ($process.ExitCode -ne 0) { throw 'Published desktop EXE failed.' }

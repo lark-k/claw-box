@@ -17,6 +17,7 @@ try {
     & python -B -m unittest discover -s tests/ClawBox.Board.Tests -p 'test_*.py'
     if ($LASTEXITCODE -ne 0) { throw 'Board installer tests failed (Python 3.11+ required).' }
     & (Join-Path $PSScriptRoot 'Test-DesktopStateRepair.ps1')
+    & (Join-Path $repoRoot 'tests/ClawBox.Installer.Tests/Test-StartupReport.ps1')
     & $dotnet format ClawBox.sln whitespace --verify-no-changes --no-restore
     if ($LASTEXITCODE -ne 0) { throw 'Formatting failed.' }
 } finally { Pop-Location }

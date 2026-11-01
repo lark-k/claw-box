@@ -52,8 +52,8 @@ public partial class MainWindow : Window
         QueueLatest();
         if (preview || startupAttempted) return;
         startupAttempted = true;
-        if (await TryConnectOnStartup(Model.Settings, async () => { await Model.Connect(); return Model.Connected; })) return;
-        ShowConnectionRecovery();
+        // Start on the home screen. Connection dialogs are opened only by user actions.
+        await TryConnectOnStartup(Model.Settings, async () => { await Model.Connect(); return Model.Connected; });
     }
     internal static async Task<bool> TryConnectOnStartup(ClawBox.Desktop.Models.DesktopSettings settings, Func<Task<bool>> connect)
         => File.Exists(settings.ProfilePath) && File.Exists(settings.GatewayTokenFile) && await connect();
