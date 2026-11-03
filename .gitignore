@@ -8,6 +8,13 @@
 **/.gradle/
 **/.vite/
 **/.cache/
+# Harness build staging, package stores and local runtime state.
+**/.desktop-build/
+**/.dsh-build/
+**/.dsh-report/
+**/.pnpm-store/
+**/.storages/
+**/.sessions/
 **/.pytest_cache/
 **/.mypy_cache/
 **/.ruff_cache/

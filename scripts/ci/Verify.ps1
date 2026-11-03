@@ -16,6 +16,10 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'OpenClaw plugin tests failed (Node.js 22+ required).' }
     & python -B -m unittest discover -s tests/ClawBox.Board.Tests -p 'test_*.py'
     if ($LASTEXITCODE -ne 0) { throw 'Board installer tests failed (Python 3.11+ required).' }
+    & python -B -m unittest discover -s tests/Quantum.ModelGateway.Tests -p 'test_*.py'
+    if ($LASTEXITCODE -ne 0) { throw 'Quantum model gateway tests failed.' }
+    & node --test tests/Quantum.ModelGateway.Tests/profile.test.mjs
+    if ($LASTEXITCODE -ne 0) { throw 'Quantum profile compatibility tests failed.' }
     & (Join-Path $PSScriptRoot 'Test-DesktopStateRepair.ps1')
     & (Join-Path $repoRoot 'tests/ClawBox.Installer.Tests/Test-StartupReport.ps1')
     & $dotnet format ClawBox.sln whitespace --verify-no-changes --no-restore

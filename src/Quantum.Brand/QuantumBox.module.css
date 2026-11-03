@@ -1,0 +1,16 @@
+.section { padding: 24px; }
+.editor { display: flex; flex-direction: column; gap: 16px; width: 100%; max-width: 520px; box-sizing: border-box; color: var(--dsw-alias-label-primary); }
+.device { display: flex; align-items: center; gap: 12px; }
+.deviceIcon { display: grid; place-items: center; width: 44px; height: 44px; border-radius: var(--dsw-radius-md); background: var(--dsw-alias-bg-skeleton); }
+.device h3 { font-size: 16px; font-weight: 500; line-height: 24px; margin: 0 0 4px; }
+.status, .description, .pending, .hint { font-size: 13px; line-height: 20px; }
+.status, .pending, .hint { color: var(--dsw-alias-label-secondary); }
+.description, .pending { margin: 0; }
+.pending { padding: 12px; border: 1px solid var(--dsw-alias-border-l2); border-radius: var(--dsw-radius-md); }
+.form { display: flex; flex-direction: column; gap: 8px; }
+.form label { font-size: 13px; line-height: 20px; margin-top: 4px; }
+.form input { min-height: 36px; }
+.feedback { min-height: 40px; font-size: 13px; line-height: 20px; }
+.actions { display: flex; justify-content: flex-end; }
+.dialog { width: min(560px, calc(100vw - 32px)); }
+@media (max-width: 600px) { .section { padding: 16px; } }
