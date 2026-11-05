@@ -48,15 +48,27 @@ async def exchange(transport, message):
 async def run(args):
     from bleak import BleakClient, BleakScanner
     if args.action == "discover":
-        discovered = await BleakScanner.discover(timeout=10, return_adv=True, service_uuids=[SERVICE_UUID])
+        discovered = await BleakScanner.discover(timeout=12, return_adv=True, service_uuids=[SERVICE_UUID])
         devices = [(device, adv) for device, adv in discovered.values()
                    if SERVICE_UUID in [u.lower() for u in adv.service_uuids]]
+        if not devices:
+            discovered = await BleakScanner.discover(timeout=12, return_adv=True, service_uuids=[SERVICE_UUID])
+            devices = [(device, adv) for device, adv in discovered.values()
+                       if SERVICE_UUID in [u.lower() for u in adv.service_uuids]]
         return [{"name": adv.local_name, "address": device.address, "rssi": adv.rssi} for device, adv in devices]
     selected = await BleakScanner.find_device_by_address(args.address, timeout=15)
     if selected is None:
         raise ProtocolError("select_discovered_device")
     key = serialization.load_ssh_private_key(Path(args.key).read_bytes(), password=None)
-    client = Client(key, args.fingerprint, claim=args.claim)
+    secret = None
+    if args.join:
+        try:
+            secret = bytes.fromhex(getpass.getpass("Box pairing secret (64 hexadecimal characters): ").strip())
+            if len(secret) != 32:
+                raise ValueError()
+        except ValueError:
+            raise ProtocolError("invalid_join_secret") from None
+    client = Client(key, args.fingerprint, claim=args.claim, join_secret=secret)
     request = {"op": args.action}
     if args.action == "configure":
         request.update(ssid=args.ssid, password=getpass.getpass("Wi-Fi password: "), security=args.security,
@@ -81,13 +93,15 @@ def main():
     parser.add_argument("--address")
     parser.add_argument("--key", help="Existing dedicated OpenSSH Ed25519 private key")
     parser.add_argument("--fingerprint", help="Previously trusted SSH host fingerprint")
-    parser.add_argument("--claim", action="store_true", help="Explicit first-use selection; never replaces a binding")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--claim", action="store_true", help="Explicit first-use selection; never replaces a binding")
+    mode.add_argument("--join", action="store_true", help="Add another computer using its box pairing secret")
     parser.add_argument("--ssid")
     parser.add_argument("--security", choices=["wpa-psk", "open"], default="wpa-psk")
     parser.add_argument("--hidden", action="store_true")
     args = parser.parse_args()
-    if args.action != "discover" and (not args.key or not args.address or (not args.fingerprint and not args.claim)):
-        parser.error("Select a device and supply the owner key plus trusted fingerprint (or explicit --claim).")
+    if args.action != "discover" and (not args.key or not args.address or (not args.fingerprint and not args.claim and not args.join)):
+        parser.error("Select a device and supply the owner key plus trusted fingerprint (or explicit --claim/--join).")
     if args.action == "configure" and not args.ssid:
         parser.error("configure requires --ssid")
     try:

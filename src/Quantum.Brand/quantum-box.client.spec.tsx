@@ -66,6 +66,37 @@ it('prevents saving before settings load or when writes are unavailable', () => 
   expect(screen.getByText(zh.unavailable)).toBeTruthy()
   expect(save).not.toHaveBeenCalled()
 })
+it('connects a wired box and clears the administrator password', async () => {
+  const call = vi.fn(async (request: Record<string, unknown>) => ({ connected: request.op === 'pair-wired' }))
+  const props = { ...globals, useBox: <T,>(selector: (value: ConfigFormSnapshot<BoxSettings>) => T) => selector(ready),
+    save: vi.fn(async () => true), call, t: (key: BoxKey) => zh[key] }
+  render(<BoxEditor {...props} />)
+  await waitFor(() => expect(call).toHaveBeenCalledWith({ op: 'status' }))
+  fireEvent.change(screen.getByLabelText(zh.adminPassword), { target: { value: 'test-password' } })
+  fireEvent.click(screen.getByRole('button', { name: zh.connect }))
+  await waitFor(() => expect(call).toHaveBeenCalledWith({ op: 'pair-wired', host: '192.168.137.2', port: 22, password: 'test-password' }))
+  await screen.findByText(zh.connected)
+  expect((screen.getByLabelText(zh.adminPassword) as HTMLInputElement).value).toBe('')
+})
+it('uses the computer Wi-Fi and does not ask for a pairing key', async () => {
+  const call = vi.fn(async (request: Record<string, unknown>) => {
+    if (request.op === 'current-wifi') return { name: 'Office Wi-Fi' }
+    if (request.op === 'discover') return [{ address: '42', name: 'Quantum Box' }]
+    return { connected: request.op === 'pair-wireless' }
+  })
+  const props = { ...globals, useBox: <T,>(selector: (value: ConfigFormSnapshot<BoxSettings>) => T) => selector(ready),
+    save: vi.fn(async () => true), call, t: (key: BoxKey) => zh[key] }
+  render(<BoxEditor {...props} />)
+  fireEvent.click(screen.getByRole('button', { name: zh.wireless }))
+  await waitFor(() => expect((screen.getByLabelText(zh.wifiSsid) as HTMLInputElement).value).toBe('Office Wi-Fi'))
+  expect((screen.getByLabelText(zh.wifiSsid) as HTMLInputElement).readOnly).toBe(true)
+  expect(screen.queryByLabelText(zh.pairingCode)).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: zh.discover }))
+  await screen.findByText('Quantum Box')
+  fireEvent.change(screen.getByLabelText(zh.wifiPassword), { target: { value: 'test-password' } })
+  fireEvent.click(screen.getByRole('button', { name: zh.connect }))
+  await waitFor(() => expect(call).toHaveBeenCalledWith({ op: 'pair-wireless', address: '42', port: 22, wifi: { password: 'test-password' } }))
+})
 it('offers box configuration instead of login and closes the dialog', async () => {
   const { props } = editor()
   cleanup()

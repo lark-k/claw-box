@@ -74,16 +74,30 @@ def apply():
 
     main = 'apps/desktop/src/main.ts'
     def native_identity(text):
-        text = product_text(text)
+        text = product_text(text).replace("import { installFileActions }", "import { QuantumCompanion } from './quantum-companion.ts'\nimport { installFileActions }", 1)
         text = text.replace('let focusPrimaryWindow =',
                             "app.setName('Quantum Harness')\nif (process.platform === 'win32') app.setAppUserModelId('com.quantum.harness.next')\n\nlet focusPrimaryWindow =", 1)
         text = text.replace('    width: 1280,', "    title: 'Quantum Harness',\n    icon: app.isPackaged ? join(process.resourcesPath, 'icon.png') : join(app.getAppPath(), 'resources', 'icon-windows.png'),\n    width: 1280,", 1)
         text = text.replace('stopAccount = accountBackend.watch(', "if (process.env.DSH_CLIENT_BUILD_PROFILE !== 'quantum') stopAccount = accountBackend.watch(", 1)
         text = text.replace('needsWelcome(', "quantumNeedsWelcome(")
         text = text.replace("let focusPrimaryWindow =", "const quantumNeedsWelcome = (value: Parameters<typeof needsWelcome>[0]) => process.env.DSH_CLIENT_BUILD_PROFILE !== 'quantum' && needsWelcome(value)\n\nlet focusPrimaryWindow =", 1)
+        text = text.replace('  installDesktopDirectoryPicker(() => mainWindow)', '''  if (process.env.DSH_CLIENT_BUILD_PROFILE === 'quantum') {
+    const quantumBox = new QuantumCompanion()
+    ipcMain.handle('quantum-box:call', (event, request: unknown) => {
+      assertDesktopSender(event, ['app'])
+      if (event.sender !== mainWindow?.webContents || event.senderFrame !== event.sender.mainFrame) throw new Error('Rejected box command')
+      return quantumBox.call(request)
+    })
+    app.on('will-quit', () => { quantumBox.dispose() })
+  }
+  installDesktopDirectoryPicker(() => mainWindow)''', 1)
         return text
     # Compose from the same baseline; the prior product-only pass is an accepted intermediate.
     edit(main, native_identity)
+    publish('apps/desktop/src/quantum-companion.ts', (Path(__file__).parent / 'quantum-companion.ts').read_bytes())
+    edit('apps/desktop/src/preload-app.ts', lambda text: text.replace(
+        "  contextBridge.exposeInMainWorld('dshOnboarding', {",
+        "  if (process.isMainFrame) contextBridge.exposeInMainWorld('quantumBox', { call: (request: unknown) => ipcRenderer.invoke('quantum-box:call', request) as Promise<unknown> })\n  contextBridge.exposeInMainWorld('dshOnboarding', {", 1))
     edit('apps/desktop/tsdown.config.ts', lambda text: text.replace(
         "const clientVersionDefine = {", "const clientVersionDefine = { 'process.env.DSH_CLIENT_BUILD_PROFILE': JSON.stringify(clientEnvironment.DSH_CLIENT_BUILD_PROFILE),"))
     publish('apps/desktop/src/runtime-path.ts', (Path(__file__).parent / 'runtime-path.ts').read_bytes())
@@ -177,11 +191,24 @@ def apply():
          .replace("installerSidebar: join(buildPaths.root, 'installer-ui', 'uninstaller-sidebar.bmp')", "installerSidebar: env.QUANTUM_STANDARD_NSIS === '1' ? undefined : join(buildPaths.root, 'installer-ui', 'uninstaller-sidebar.bmp')")
          .replace("uninstallerSidebar: join(buildPaths.root, 'installer-ui', 'uninstaller-sidebar.bmp')", "uninstallerSidebar: env.QUANTUM_STANDARD_NSIS === '1' ? undefined : join(buildPaths.root, 'installer-ui', 'uninstaller-sidebar.bmp')")
          .replace("include: fileURLToPath(new URL('./installer.nsh', import.meta.url))", "include: env.QUANTUM_STANDARD_NSIS === '1' ? undefined : fileURLToPath(new URL('./installer.nsh', import.meta.url))")
+         .replace('    extraResources: [', "    extraResources: [" + chr(10) + "      ...(packagesWindows && env.QUANTUM_BOX_COMPANION_DIR ? [{ from: env.QUANTUM_BOX_COMPANION_DIR, to: 'quantum-box' }] : []),", 1)
          .replace('allowToChangeInstallationDirectory: false', 'allowToChangeInstallationDirectory: true'))
     edit('apps/desktop/scripts/desktop-toolchain-preflight.ts', lambda text: text.replace(
         "  if (platform === 'win32') failures.push", "  if (platform === 'win32' && environment.QUANTUM_STANDARD_NSIS !== '1') failures.push"))
     edit('apps/desktop/scripts/prepare-runtime.ts', lambda text: text.replace('chmodSync, cpSync, mkdirSync, rmSync, writeFileSync', 'chmodSync, cpSync, mkdirSync, readFileSync, rmSync, writeFileSync')
+         .replace("  const archive = await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'download:electron',", "  if (process.env.QUANTUM_REUSE_ELECTRON === '1' && platform === 'win32' && arch === 'x64') {\n    const exe = join(BUILD_PATHS.electron, 'electron.exe')\n    const actual = execFileSync(exe, ['-p', 'process.versions.electron'], { encoding: 'utf8', env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } }).trim()\n    if (actual !== version || readFileSync(join(BUILD_PATHS.electron, 'version'), 'utf8').trim() !== version) throw new Error('Cached Electron version does not match')\n    return execFileSync(exe, ['-p', 'process.versions.node'], { encoding: 'utf8', env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } }).trim()\n  }\n  const archive = await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'download:electron',", 1)
          .replace("cacheRoot: BUILD_PATHS.downloads }", "cacheRoot: BUILD_PATHS.downloads, ...(process.env.QUANTUM_ELECTRON_CHECKSUM_FILE ? { checksums: Object.fromEntries(readFileSync(process.env.QUANTUM_ELECTRON_CHECKSUM_FILE, 'utf8').trim().split(/\\r?\\n/u).map(line => { const [hash, filename] = line.trim().split(/\\s+/u); return [filename!.replace(/^\\*/u, ''), hash!]; })) } : {}) }"))
+    edit('apps/desktop/scripts/prepare-primary-runtime.ts', lambda text: text
+         .replace("import { readFileSync } from 'node:fs'", "import { cpSync, readFileSync } from 'node:fs'\nimport lock from '../../../scripts/primary-runtime/lock.json' with { type: 'json' }")
+         .replace('preparePrimaryRuntime as preparePayload, smokePrimaryRuntime as smokePayload', 'preparePrimaryRuntime as preparePayload, smokePrimaryRuntime as smokePayload, primaryRuntimePayloadDigest')
+         .replace('  await preparePayload({ target: resolveDesktopBuildTarget(), output: paths.runtime, cache: paths.downloads, version })', '''  const reuse = process.env.QUANTUM_REUSE_RUNTIME
+  if (reuse) {
+    const manifest = parsePrimaryRuntime(JSON.parse(readFileSync(join(reuse, 'primary-runtime', 'runtime.json'), 'utf8')))
+    const target = resolveDesktopBuildTarget()
+    if (manifest.desktopVersion !== version || manifest.payloadDigest !== primaryRuntimePayloadDigest(target, lock, manifest.pnpm)) throw new Error('Quantum cached runtime does not match the pinned lock')
+    cpSync(join(reuse, 'primary-runtime'), join(paths.runtime, 'primary-runtime'), { recursive: true })
+    cpSync(join(reuse, 'office-skills'), join(paths.runtime, 'office-skills'), { recursive: true })
+  } else await preparePayload({ target: resolveDesktopBuildTarget(), output: paths.runtime, cache: paths.downloads, version })'''))
     # Upstream's unsigned local build profile is the coherent Quantum artifact profile.
     edit('scripts/client-build-environment.ts', lambda text: text.replace("DSH_CLIENT_BUILD_PROFILE: 'local',", "DSH_CLIENT_BUILD_PROFILE: 'quantum',\n        DSH_CLIENT_TITLE: 'Quantum Harness',"))
     edit('apps/desktop/scripts/desktop-package-environment.mjs', lambda text: text
@@ -213,7 +240,7 @@ def apply():
         publish(account + destination, (Path(__file__).parent / source).read_bytes())
     edit(account + 'src/client/index.ts', lambda text: product_text(text)
          .replace("import type { TranscriptViewMode }", "import { applyQuantumBox } from './quantum-box-apply.ts'\nimport type { TranscriptViewMode }", 1)
-         .replace("export const inject = ['slots',", "export const inject = process.env.DSH_CLIENT_BUILD_PROFILE === 'quantum' ? ['slots', 'locale', 'configForms'] : ['slots',", 1)
+         .replace("export const inject = ['slots',", "export const inject = process.env.DSH_CLIENT_BUILD_PROFILE === 'quantum' ? ['slots', 'locale', 'configForms', 'remote', 'remote.credentials', 'remote.settings'] : ['slots',", 1)
          .replace('export function apply(ctx: Context): void {', "export function apply(ctx: Context): void {\n  if (process.env.DSH_CLIENT_BUILD_PROFILE === 'quantum') { applyQuantumBox(ctx); return }", 1))
     edit(account + 'src/index.ts', lambda text: text
          .replace("import z from '@deepseek-ai/schemastery'", "import z from '@deepseek-ai/schemastery'\nimport { BoxSettingsFields } from './box-settings.ts'")

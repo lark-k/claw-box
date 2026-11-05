@@ -1,5 +1,5 @@
 /** Quantum's pending device connection surface replaces the official account UI. */
-import { useId, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { Button, Input, Menu, Modal, IconEllipsisOutlineMedium, IconLinkOutlineRegular, IconSettingsOutlineMedium } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client'
@@ -13,17 +13,35 @@ import css from './QuantumBox.module.css'
 export interface BoxInjected {
   hooks: { box: ConfigForm<BoxSettings> }
   save: (host: string, port: number, revision: number) => Promise<boolean>
+  call?: (request: Record<string, unknown>) => Promise<unknown>
 }
 type EditorProps = InjectFace<BoxInjected> & PropsLocale<'settings.box'>
 
 /** One editor is shared by the sidebar dialog and the settings page. */
-export function BoxEditor({ useBox, save, t }: EditorProps) {
+export function BoxEditor({ useBox, save, call, t }: EditorProps) {
   const snapshot = useBox(value => value)
   const [draft, setDraft] = useState<{ host: string; port: string }>()
   const host = draft?.host ?? snapshot.value?.boxHost ?? ''
   const port = draft?.port ?? String(snapshot.value?.boxSshPort ?? 22)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<BoxKey>()
+  const [connectionError, setConnectionError] = useState('')
+  const [connected, setConnected] = useState(false)
+  const [mode, setMode] = useState<'wired' | 'wireless'>('wired')
+  const [password, setPassword] = useState('')
+  const [ssid, setSsid] = useState('')
+  const [wifiPassword, setWifiPassword] = useState('')
+  const [devices, setDevices] = useState<{ address: string; name: string }[]>([])
+  const [device, setDevice] = useState('')
+  useEffect(() => {
+    let active = true
+    const refresh = () => { if (call !== undefined) void call({ op: 'status' }).then(value => {
+      if (active && typeof value === 'object' && value !== null && 'connected' in value) setConnected(value.connected === true)
+    }).catch(() => {}) }
+    refresh()
+    const timer = setInterval(refresh, 5000)
+    return () => { active = false; clearInterval(timer) }
+  }, [call])
   const fieldId = useId()
   const update = (value: { host: string; port: string }) => { setDraft(value); setMessage(undefined) }
   const submit = async () => {
@@ -40,14 +58,37 @@ export function BoxEditor({ useBox, save, t }: EditorProps) {
     } catch { setMessage('failed') } finally { setBusy(false) }
   }
   const error = message !== undefined && message !== 'saved'
+  const perform = async (request: Record<string, unknown>) => {
+    if (call === undefined) { setMessage('desktopOnly'); return }
+    setBusy(true); setMessage(undefined); setConnectionError('')
+    try {
+      const value = await call(request)
+      if (request.op === 'discover') {
+        const found = Array.isArray(value) ? value as { address: string; name: string }[] : []
+        setDevices(found); setDevice(found[0]?.address ?? '')
+        if (found.length === 0) setMessage('noBoxes')
+      } else if (typeof value === 'object' && value !== null && 'connected' in value) {
+        setConnected(value.connected === true)
+      }
+    } catch (error) {
+      setConnectionError(error instanceof Error ? error.message : t('connectionFailed'))
+    } finally { setBusy(false); if (request.op !== 'discover') { setPassword(''); setWifiPassword('') } }
+  }
+  const chooseWireless = async () => {
+    setMode('wireless'); setConnectionError(''); setSsid('')
+    try {
+      const result = await call?.({ op: 'current-wifi' })
+      if (typeof result === 'object' && result !== null && 'name' in result && typeof result.name === 'string') setSsid(result.name)
+    } catch (error) { setConnectionError(error instanceof Error ? error.message : t('connectionFailed')) }
+  }
   return <div className={css.editor}>
     <div className={css.device}>
       <span className={css.deviceIcon}><IconLinkOutlineRegular size={22} /></span>
-      <div><h3>{t('heading')}</h3><span className={css.status}>{t('status')}</span></div>
+      <div><h3>{t('heading')}</h3><span className={css.status}>{t(connected ? 'connected' : 'status')}</span></div>
     </div>
     <p className={css.description}>{t('description')}</p>
-    <p className={css.pending}>{t('pending')}</p>
-    <form noValidate onSubmit={event => { event.preventDefault(); void submit() }} className={css.form}>
+    {call === undefined && <p className={css.pending}>{t('pending')}</p>}
+    {call === undefined && <form noValidate onSubmit={event => { event.preventDefault(); void submit() }} className={css.form}>
       <label htmlFor={`${fieldId}-host`}>{t('host')}</label>
       <Input id={`${fieldId}-host`} value={host} disabled={busy} placeholder={t('hostPlaceholder')} autoComplete="off"
         aria-describedby={`${fieldId}-hint`} aria-invalid={message === 'invalidHost'}
@@ -62,7 +103,39 @@ export function BoxEditor({ useBox, save, t }: EditorProps) {
       <div className={css.actions}><Button type="submit" variant="primary" disabled={busy || snapshot.status !== 'ready' || !snapshot.writable}>
         {t(busy ? 'saving' : 'save')}
       </Button></div>
-    </form>
+    </form>}
+    {call !== undefined && <div className={css.form}>
+      {connectionError && <div className={css.connectionError} role="alert">{connectionError}</div>}
+      <div className={css.actions}>
+        <Button type="button" onClick={() => setMode('wired')}>{t('wired')}</Button>
+        <Button type="button" onClick={() => { void chooseWireless() }}>{t('wireless')}</Button>
+      </div>
+      {mode === 'wired' ? <>
+        <p className={css.hint}>{t('wiredGuide')}</p>
+        <label htmlFor={`${fieldId}-password`}>{t('adminPassword')}</label>
+        <Input id={`${fieldId}-password`} type="password" value={password} autoComplete="off" onChange={event => setPassword(event.target.value)} />
+      </> : <>
+        <Button type="button" disabled={busy} onClick={() => { void perform({ op: 'discover' }) }}>{t(busy ? 'scanning' : 'discover')}</Button>
+        <label htmlFor={`${fieldId}-device`}>{t('selectBox')}</label>
+        <select id={`${fieldId}-device`} value={device} onChange={event => setDevice(event.target.value)}>
+          <option value="">{t('selectBox')}</option>{devices.map(item => <option key={item.address} value={item.address}>{item.name}</option>)}
+        </select>
+        <label htmlFor={`${fieldId}-ssid`}>{t('wifiSsid')}</label>
+        <Input id={`${fieldId}-ssid`} value={ssid} readOnly />
+        <label htmlFor={`${fieldId}-wifi`}>{t('wifiPassword')}</label>
+        <Input id={`${fieldId}-wifi`} type="password" value={wifiPassword} autoComplete="off" onChange={event => setWifiPassword(event.target.value)} />
+        <span className={css.hint}>{t('wifiHint')}</span>
+      </>}
+      <div className={css.actions}>
+        <Button type="button" variant="primary" disabled={busy || (mode === 'wired' ? !password : !device || !ssid)}
+          onClick={() => { void perform(mode === 'wired'
+            ? { op: 'pair-wired', host: '192.168.137.2', port: 22, password }
+            : { op: 'pair-wireless', address: device, port: 22, wifi: { password: wifiPassword } }) }}>
+          {t(busy ? 'connecting' : 'connect')}
+        </Button>
+        {connected && <Button type="button" disabled={busy} onClick={() => { void perform({ op: 'disconnect' }) }}>{t('disconnect')}</Button>}
+      </div>
+    </div>}
   </div>
 }
 

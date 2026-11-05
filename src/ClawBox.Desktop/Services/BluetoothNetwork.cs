@@ -22,6 +22,22 @@ public sealed record WirelessNetwork(string Ssid, string Bytes, int Strength, bo
 }
 public sealed record WirelessStatus(bool Connected, string[] Addresses, string? Ssid, string? SsidBytes = null);
 
+// Windows can deliver scan responses before the advertisement containing the service UUID.
+public sealed class NearbyBoardDiscovery
+{
+    private readonly ConcurrentDictionary<ulong, NearbyBoard> boards = new();
+    private readonly ConcurrentDictionary<ulong, string> names = new();
+    public void Observe(ulong address, string? name, short signal, bool hasService)
+    {
+        if (!string.IsNullOrWhiteSpace(name) && (name.StartsWith("ClawBox-", StringComparison.Ordinal) || boards.ContainsKey(address)))
+            names[address] = name;
+        if (!hasService && !boards.ContainsKey(address)) return;
+        string displayName = names.TryGetValue(address, out string? known) ? known : "ClawBox";
+        boards[address] = new(address, displayName, signal);
+    }
+    public NearbyBoard[] Results() => boards.Values.OrderByDescending(d => d.Signal).ToArray();
+}
+
 public interface IWirelessLink : IDisposable
 {
     Task<JsonElement> Exchange(JsonElement message, CancellationToken cancellation);
@@ -44,21 +60,21 @@ public sealed class BluetoothNetwork : IWirelessLink
         BluetoothAdapter? adapter = await BluetoothAdapter.GetDefaultAsync().AsTask(cancellation);
         if (adapter is null || !adapter.IsLowEnergySupported || (await adapter.GetRadioAsync().AsTask(cancellation)).State != RadioState.On)
             throw new WirelessException("bluetooth_unavailable");
-        ConcurrentDictionary<ulong, NearbyBoard> boards = new();
+        NearbyBoardDiscovery boards = new();
         BluetoothLEAdvertisementWatcher watcher = new() { ScanningMode = BluetoothLEScanningMode.Active, AllowExtendedAdvertisements = true };
         watcher.Received += (_, args) =>
         {
-            if (!args.Advertisement.ServiceUuids.Contains(ServiceId) && !boards.ContainsKey(args.BluetoothAddress)) return;
-            string name = args.Advertisement.LocalName;
-            if (string.IsNullOrWhiteSpace(name)) name = boards.TryGetValue(args.BluetoothAddress, out NearbyBoard? old) ? old.Name : "ClawBox";
-            boards[args.BluetoothAddress] = new(args.BluetoothAddress, name, args.RawSignalStrengthInDBm);
+            boards.Observe(args.BluetoothAddress, args.Advertisement.LocalName, args.RawSignalStrengthInDBm,
+                args.Advertisement.ServiceUuids.Contains(ServiceId));
         };
         try
         {
             watcher.Start();
             await Task.Delay(TimeSpan.FromSeconds(12), cancellation);
+            // Keep listening automatically when an initial scan misses intermittent advertisements.
+            if (boards.Results().Length == 0) await Task.Delay(TimeSpan.FromSeconds(12), cancellation);
             if (watcher.Status == BluetoothLEAdvertisementWatcherStatus.Aborted) throw new WirelessException("bluetooth_unavailable");
-            return boards.Values.OrderByDescending(d => d.Signal).ToArray();
+            return boards.Results();
         }
         finally { watcher.Stop(); }
     }

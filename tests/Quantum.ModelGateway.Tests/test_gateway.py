@@ -7,6 +7,7 @@ import unittest
 import os
 import subprocess
 import tempfile
+from unittest.mock import patch
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 spec = importlib.util.spec_from_file_location('gateway', Path(__file__).parents[2] / 'src/Quantum.ModelGateway/gateway.py')
@@ -77,6 +78,24 @@ class Tests(unittest.TestCase):
         self.assertEqual(self.request(token='wrong').status, 401)
         self.assertFalse(hasattr(self.model, 'received'))
 
+    def test_individual_client_credentials_can_be_revoked(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'clients.json'
+            a, b = 'client-a-' + 'a' * 32, 'client-b-' + 'b' * 32
+            path.write_text(json.dumps({'a': a, 'b': b}))
+            self.relay.config['clientTokensFile'] = str(path)
+            self.model.release.set()
+            response = self.request(token=a)
+            self.assertEqual(response.status, 200)
+            response.read()
+            path.write_text(json.dumps({'b': b}))
+            response = self.request(token=a)
+            self.assertEqual(response.status, 401)
+            response.read()
+            response = self.request(token=b)
+            self.assertEqual(response.status, 200)
+            response.read()
+
     def test_browser_origins_are_rejected(self):
         self.assertEqual(self.request(extra={'Origin': 'https://example.com'}).status, 401)
 
@@ -99,6 +118,25 @@ class Tests(unittest.TestCase):
             gateway.Gateway(('0.0.0.0', 0), self.config)
         with self.assertRaises(ValueError):
             gateway.Gateway(('127.0.0.1', 0), {**self.config, 'allowHttp': False})
+        with self.assertRaises(ValueError):
+            gateway.Gateway(('127.0.0.1', 0), {**self.config, 'upstreamInterfaces': ['invalid/interface']})
+
+    @unittest.skipUnless(hasattr(gateway.socket, 'SO_BINDTODEVICE'), 'Linux interface routing')
+    def test_interface_selection_falls_back_before_any_request_is_sent(self):
+        class Socket:
+            def __init__(self, fails):
+                self.fails = fails
+                self.closed = False
+            def settimeout(self, _timeout): pass
+            def setsockopt(self, *_args): pass
+            def connect(self, _target):
+                if self.fails: raise OSError('unavailable')
+            def close(self): self.closed = True
+        failed, connected = Socket(True), Socket(False)
+        with patch.object(gateway.socket, 'getaddrinfo', return_value=[(2, 1, 6, '', ('192.0.2.1', 80))]), \
+             patch.object(gateway.socket, 'socket', side_effect=[failed, connected]):
+            self.assertIs(gateway.connect_interfaces(('example.test', 80), ['eth0', 'wlan0'], 300), connected)
+        self.assertTrue(failed.closed)
 
     def test_model_discovery_uses_server_credential(self):
         connection = http.client.HTTPConnection('127.0.0.1', self.relay.server_port, timeout=3)

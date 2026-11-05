@@ -11,6 +11,7 @@
 .form label { font-size: 13px; line-height: 20px; margin-top: 4px; }
 .form input { min-height: 36px; }
 .feedback { min-height: 40px; font-size: 13px; line-height: 20px; }
+.connectionError { color: var(--dsw-alias-label-primary); font-size: 13px; line-height: 20px; }
 .actions { display: flex; justify-content: flex-end; }
-.dialog { width: min(560px, calc(100vw - 32px)); }
+.dialog { width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow-y: auto; }
 @media (max-width: 600px) { .section { padding: 16px; } }

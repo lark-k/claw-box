@@ -14,12 +14,14 @@ from clawbox_network.framing import Frames
 from clawbox_network.protocol import (Client, MAX_MESSAGE, Owners, ProtocolError, Service,
                                       canonical, fingerprint, public_text)
 from clawbox_network.network import Network, validate_wifi
+from clawbox_network.model import ModelBootstrap
 
 
 class MemoryOwners:
     def __init__(self, *keys):
         self.values = {public_text(key.public_key()) for key in keys}
         self.enrolled = bool(keys)
+        self.secret = bytes(range(32))
 
     def keys(self):
         return self.values
@@ -30,6 +32,13 @@ class MemoryOwners:
     def claim(self, public):
         if self.enrolled:
             raise ProtocolError("already_bound")
+        self.values.add(public)
+        self.enrolled = True
+
+    def join_secret(self):
+        return self.secret
+
+    def join(self, public):
         self.values.add(public)
         self.enrolled = True
 
@@ -85,6 +94,37 @@ class ProtocolTests(unittest.TestCase):
         with self.assertRaisesRegex(ProtocolError, "already_bound"):
             self.server.exchange("x", stranger.hello)
 
+    def test_join_keeps_original_and_new_owners_can_resume(self):
+        second_key = ed25519.Ed25519PrivateKey.generate()
+        client = Client(second_key, self.server.identity, join_secret=self.owners.secret)
+        auth = client.accept(self.server.exchange("b", client.hello))
+        self.assertTrue(client.receive(self.server.exchange("b", auth))["ok"])
+        self.assertEqual(2, len(self.owners.keys()))
+        self.connect("a", self.owner)
+        self.connect("b", second_key)
+
+    def test_open_enrollment_adds_new_key_without_removing_existing_owner(self):
+        second_key = ed25519.Ed25519PrivateKey.generate()
+        client = Client(second_key, self.server.identity)
+        client.hello["mode"] = "open"
+        auth = client.accept(self.server.exchange("b", client.hello))
+        self.assertTrue(client.receive(self.server.exchange("b", auth))["ok"])
+        self.assertEqual(2, len(self.owners.keys()))
+        self.connect("a", self.owner)
+        self.connect("b", second_key)
+
+    def test_join_requires_secret_and_rejects_rotation_during_handshake(self):
+        second_key = ed25519.Ed25519PrivateKey.generate()
+        bad = Client(second_key, self.server.identity, join_secret=bytes(32))
+        with self.assertRaisesRegex(ProtocolError, "invalid_join_proof"):
+            bad.accept(self.server.exchange("b", bad.hello))
+        self.assertEqual(1, len(self.owners.keys()))
+        client = Client(second_key, self.server.identity, join_secret=self.owners.secret)
+        auth = client.accept(self.server.exchange("b", client.hello))
+        self.owners.secret = bytes(32)
+        self.assertEqual("invalid_join_proof", client.receive(self.server.exchange("b", auth))["error"])
+        self.assertEqual(1, len(self.owners.keys()))
+
     def test_explicit_first_claim_then_reboot_stays_bound(self):
         self.server.owners = MemoryOwners()
         self.connect(claim=True)
@@ -99,6 +139,15 @@ class ProtocolTests(unittest.TestCase):
         response = client.receive(self.server.exchange("a", client.request({"op": "scan"})))
         self.assertEqual("not_owner", response["error"])
         self.assertFalse(self.owners.enrollment_open())
+
+    def test_model_setup_requires_a_live_registered_owner(self):
+        self.server.model = types.SimpleNamespace(setup=lambda owner: {"owner": owner})
+        client = self.connect()
+        reply = client.receive(self.server.exchange("a", client.request({"op": "model_setup"})))
+        self.assertEqual(public_text(self.owner.public_key()), reply["result"]["owner"])
+        self.owners.values.clear()
+        reply = client.receive(self.server.exchange("a", client.request({"op": "model_setup"})))
+        self.assertEqual("not_owner", reply["error"])
 
     def test_owner_signature_required(self):
         client = Client(self.owner, self.server.identity)
@@ -222,6 +271,44 @@ class OwnerStoreTests(unittest.TestCase):
         self.assertIn('command="/bin/false"', contents)
         self.assertIn('permitlisten="127.0.0.1:18791"', contents)
         self.assertFalse(self.store.enrollment_open())
+
+    def test_join_appends_restricted_key_without_removing_existing(self):
+        self.store.authorized.parent.mkdir()
+        old = 'no-pty,command="/bin/false" ' + self.key + " clawbox-reverse-tunnel\n"
+        self.store.authorized.write_text(old)
+        self.store.remember_existing()
+        second = public_text(ed25519.Ed25519PrivateKey.generate().public_key())
+        fallback = types.SimpleNamespace(flock=lambda *args: None, LOCK_EX=2)
+        context = patch.dict(sys.modules, {"fcntl": fallback}) if sys.platform == "win32" else patch.dict(sys.modules, {})
+        with context:
+            self.store.join(second)
+            self.store.join(second)
+        contents = self.store.authorized.read_text()
+        self.assertTrue(contents.startswith(old))
+        self.assertEqual(2, len(self.store.keys()))
+        self.assertEqual(1, contents.count(second))
+        self.assertIn('permitopen="127.0.0.1:18792"', contents)
+
+
+class ModelBootstrapTests(unittest.TestCase):
+    def test_each_owner_gets_a_stable_independent_credential_without_upstream_secret(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = root / "config.json"
+            config.write_text(json.dumps({"model": "test-model", "upstreamToken": "server-secret", "contextWindow": 262144}))
+            setup = ModelBootstrap(config, root / "clients.json")
+            a = public_text(ed25519.Ed25519PrivateKey.generate().public_key())
+            b = public_text(ed25519.Ed25519PrivateKey.generate().public_key())
+            fallback = types.SimpleNamespace(flock=lambda *args: None, LOCK_EX=2)
+            context = patch.dict(sys.modules, {"fcntl": fallback}) if sys.platform == "win32" else patch.dict(sys.modules, {})
+            with context:
+                first, second = setup.setup(a), setup.setup(b)
+                self.assertEqual(first, setup.setup(a))
+            self.assertNotEqual(first["token"], second["token"])
+            self.assertEqual("test-model", first["model"])
+            self.assertEqual(262144, first["contextWindow"])
+            self.assertEqual(18792, first["port"])
+            self.assertNotIn("server-secret", json.dumps(first))
 
 
 class FramingTests(unittest.TestCase):

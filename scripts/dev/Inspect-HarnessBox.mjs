@@ -31,8 +31,12 @@ try {
   if (!menu.some(label => /^(连接盒子|Connect box)$/.test(label)) || menu.some(label => /登录|Sign in/.test(label))) throw new Error('Unexpected menu: '+JSON.stringify(menu));
   await evaluate(`Array.from(document.querySelectorAll('[role=menuitem]')).find(b=>/^(连接盒子|Connect box)$/.test(b.textContent.trim())).click()`);
   await new Promise(done => setTimeout(done, 700));
-  const result = await evaluate(`(() => { const d=document.querySelector('[role=dialog]'); return {title:document.title, menu:${JSON.stringify(menu)}, dialog:d?.getAttribute('aria-label'), disconnected:/尚未连接|Not connected/.test(d?.textContent??''), pending:/不会建立连接|does not connect/.test(d?.textContent??''), fields:d?.querySelectorAll('input').length, saveEnabled:Array.from(d?.querySelectorAll('button')??[]).some(b=>/^(保存配置|Save configuration)$/.test(b.textContent.trim())&&!b.disabled), externalLinks:d?.querySelectorAll('a[href]').length}; })()`);
-  if (!/^(连接盒子|Connect box)$/.test(result.dialog) || !result.disconnected || !result.pending || result.fields !== 2 || !result.saveEnabled || result.externalLinks !== 0) throw new Error('Box inspection failed: '+JSON.stringify(result));
+  const result = await evaluate(`(() => { const d=document.querySelector('[role=dialog]'); return {title:document.title, menu:${JSON.stringify(menu)}, dialog:d?.getAttribute('aria-label'), disconnected:/尚未连接|Not connected/.test(d?.textContent??''), guide:/以太网|Ethernet/.test(d?.textContent??''), password:!!d?.querySelector('input[type=password]'), externalLinks:d?.querySelectorAll('a[href]').length}; })()`);
+  if (!/^(连接盒子|Connect box)$/.test(result.dialog) || !result.guide || !result.password || result.externalLinks !== 0) throw new Error('Box inspection failed: '+JSON.stringify(result));
+  await evaluate(`Array.from(document.querySelectorAll('[role=dialog] button')).find(b=>/^(无线连接|Wireless connection)$/.test(b.textContent.trim())).click()`);
+  await new Promise(done => setTimeout(done, 1000));
+  const wireless = await evaluate(`(() => { const d=document.querySelector('[role=dialog]'); return { pairKey:/盒子配对密钥|Box pairing key/.test(d?.textContent??''), readonlyWifi:!!d?.querySelector('input[readonly]'), connect: Array.from(d?.querySelectorAll('button')??[]).some(b=>/^(连接盒子|Connect box)$/.test(b.textContent.trim())) }; })()`);
+  if (wireless.pairKey || !wireless.readonlyWifi || !wireless.connect) throw new Error('Wireless inspection failed: '+JSON.stringify(wireless));
   const screenshot = await send('Page.captureScreenshot', { format: 'png' });
   const directory = resolve(import.meta.dirname, '../../artifacts/preview');
   mkdirSync(directory, { recursive: true });

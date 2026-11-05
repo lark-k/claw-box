@@ -16,7 +16,8 @@ public sealed class WirelessException(string code) : InvalidOperationException(M
     public string Code { get; } = code;
     private static string MessageFor(string code) => code switch
     {
-        "not_owner" or "already_bound" => "这台盒子已有其他配对，请选择原来的盒子或使用原电脑连接。",
+        "not_owner" or "already_bound" => "这台电脑尚未获得盒子授权，请使用盒子的配对信息添加此电脑。",
+        "invalid_join_proof" or "join_unavailable" => "盒子配对信息无效或未启用，请核对后重试。",
         "identity_mismatch" or "invalid_signature" => "盒子身份与原配对不一致，已停止连接。换板请使用独立的更换板子入口。",
         "wifi_connection_failed" or "wifi_connection_timeout" => "未能连接 Wi-Fi，请核对密码、信号和路由器。原网络配置已保留，可重新选择网络。",
         "wifi_driver_missing" => "盒子未检测到无线网卡，请联系交付人员检查驱动。",
@@ -41,14 +42,17 @@ public sealed class WirelessProtocol : IDisposable
     private readonly HostAlgorithm algorithm;
     private readonly X25519PrivateKeyParameters ephemeral = new(new SecureRandom());
     private readonly string? expected;
+    private readonly byte[]? joinSecret;
     private byte[] outgoing = [], incoming = [];
     private string session = "";
     private ulong sequence;
     public JsonElement Hello { get; }
     public string Identity { get; private set; } = "";
     public string HostKey { get; private set; } = "";
-    public WirelessProtocol(string identityFile, string? expectedIdentity, bool claim)
+    public WirelessProtocol(string identityFile, string? expectedIdentity, bool claim, byte[]? joinSecret = null, bool open = false)
     {
+        if (joinSecret is not null && (claim || joinSecret.Length != 32)) throw new ArgumentException("Invalid join secret", nameof(joinSecret));
+        this.joinSecret = joinSecret?.ToArray();
         owner = new(identityFile);
         algorithm = owner.HostKeyAlgorithms.Single(a => a.Name == "ssh-ed25519");
         expected = expectedIdentity;
@@ -56,7 +60,7 @@ public sealed class WirelessProtocol : IDisposable
         {
             op = "hello",
             version = 1,
-            mode = claim ? "claim" : "resume",
+            mode = open ? "open" : joinSecret is not null ? "join" : claim ? "claim" : "resume",
             owner = "ssh-ed25519 " + Convert.ToBase64String(algorithm.Data),
             nonce = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)),
             ephemeral = Convert.ToBase64String(ephemeral.GeneratePublicKey().GetEncoded())
@@ -73,6 +77,16 @@ public sealed class WirelessProtocol : IDisposable
             !Canonical(Hello).SequenceEqual(Canonical(transcript.GetProperty("hello")))) throw new WirelessException("identity_mismatch");
         byte[] data = Canonical(transcript);
         VerifyHost(blob, [.. Prefix, .. data], Convert.FromBase64String(response.GetProperty("signature").GetString()!));
+        if (joinSecret is not null)
+        {
+            if (!response.TryGetProperty("join_proof", out JsonElement proofValue)) throw new WirelessException("invalid_join_proof");
+            byte[] supplied;
+            try { supplied = Convert.FromBase64String(proofValue.GetString() ?? ""); }
+            catch (FormatException) { throw new WirelessException("invalid_join_proof"); }
+            byte[] message = [.. Prefix, .. Encoding.ASCII.GetBytes("join-server\0"), .. data];
+            byte[] expectedProof = HMACSHA256.HashData(joinSecret, message);
+            if (!CryptographicOperations.FixedTimeEquals(supplied, expectedProof)) throw new WirelessException("invalid_join_proof");
+        }
         byte[] secret = new byte[32];
         ephemeral.GenerateSecret(new X25519PublicKeyParameters(Convert.FromBase64String(transcript.GetProperty("ephemeral").GetString()!)), secret, 0);
         byte[] material = HKDF.DeriveKey(HashAlgorithmName.SHA256, secret, 64, SHA256.HashData(data), Prefix);
@@ -84,7 +98,10 @@ public sealed class WirelessProtocol : IDisposable
         if (Encoding.ASCII.GetString(ReadBlob(signature, ref offset)) != "ssh-ed25519") throw new WirelessException("invalid_signature");
         byte[] proof = ReadBlob(signature, ref offset);
         if (proof.Length != 64 || offset != signature.Length) throw new WirelessException("invalid_signature");
-        return Encrypt(Element(new { op = "authenticate", proof = Convert.ToBase64String(proof) }));
+        if (joinSecret is null) return Encrypt(Element(new { op = "authenticate", proof = Convert.ToBase64String(proof) }));
+        byte[] joinMessage = [.. Prefix, .. Encoding.ASCII.GetBytes("join-client\0"), .. data];
+        byte[] joinProof = HMACSHA256.HashData(joinSecret, joinMessage);
+        return Encrypt(Element(new { op = "authenticate", proof = Convert.ToBase64String(proof), join_proof = Convert.ToBase64String(joinProof) }));
     }
     public JsonElement Encrypt(JsonElement request)
     {
@@ -158,5 +175,5 @@ public sealed class WirelessProtocol : IDisposable
         else if (value.ValueKind == JsonValueKind.Array) { writer.WriteStartArray(); foreach (JsonElement item in value.EnumerateArray()) Write(writer, item); writer.WriteEndArray(); }
         else value.WriteTo(writer);
     }
-    public void Dispose() { owner.Dispose(); CryptographicOperations.ZeroMemory(incoming); CryptographicOperations.ZeroMemory(outgoing); }
+    public void Dispose() { owner.Dispose(); CryptographicOperations.ZeroMemory(incoming); CryptographicOperations.ZeroMemory(outgoing); if (joinSecret is not null) CryptographicOperations.ZeroMemory(joinSecret); }
 }

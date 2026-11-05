@@ -20,6 +20,8 @@ python3 -B scripts/board/install-rtl8723du.py /path/to/verified-driver-source.ta
 python3 -B scripts/board/install-network.py
 ```
 
+安装器同时配置 BlueZ 传统 LE 广播间隔为 100–150 ms；不会更换设备身份或配对。它检查并保留其他配置，拒绝覆盖管理员设置的不同间隔，失败时恢复原配置。也可单独运行 `python3 -B scripts/board/configure-ble-advertising.py`。本配置影响该控制器的传统 LE 广播，适用于经过验证的 RK3568/BlueZ 组合；内核不支持加载这些默认值时安装器报错，不会声称已启用。恢复前保留网线，可从 `/var/backups/quantum-harness/ble-advertising-*` 中选择对应的 `main.conf` 备份恢复，再重启 bluetooth 和 clawbox-network。
+
 该内核头文件中 fixdep/modpost 是 x86-64 可执行文件。驱动安装器先保存原件至 `/root/.local/share/clawbox/header-tools-backup/`，仅重建这两个 host 工具为 aarch64，不编译或更换内核。DKMS 构建参数显式提供 TopDIR。驱动装入 updates/dkms，登记自动重建；模块自动加载和省电关闭分别记录在 `/etc/modules-load.d/clawbox-wifi.conf` 和 `/etc/modprobe.d/clawbox-wifi.conf`。关闭 IPS/LPS 以提高本板 Wi-Fi/蓝牙并行运行稳定性。
 
 服务源在 `/opt/clawbox-network`，上一个安装版本在 `.previous` 目录。安装器使用 systemd notify，只有 GATT 和广播注册成功才判定启动成功；失败尝试恢复旧源码、unit 和 Avahi 配置。它不修改 OpenClaw、执行器、已有主机密钥或已有配对内容，仅记录已绑定标记。

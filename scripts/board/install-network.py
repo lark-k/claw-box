@@ -18,7 +18,8 @@ def install(root):
         raise SystemExit("Run as the board administrator.")
     root = Path(root).resolve()
     source = root / "src/ClawBox.Board.Network"
-    if not (source / "clawbox_network/ble.py").is_file():
+    discovery_config = root / "scripts/board/configure-ble-advertising.py"
+    if not (source / "clawbox_network/ble.py").is_file() or not discovery_config.is_file():
         raise SystemExit("Incomplete source tree.")
     # Fail before touching services when required distro packages are absent.
     import dbus
@@ -74,6 +75,8 @@ def install(root):
         run("systemctl", "restart", "clawbox-network.service")
         time.sleep(3)
         run("systemctl", "is-active", "clawbox-network.service")
+        # The tuning script protects administrator settings and restores them on failure.
+        subprocess.run(["/usr/bin/python3", "-B", str(discovery_config)], check=True, timeout=150)
     except Exception:
         run("systemctl", "stop", "clawbox-network.service")
         if published and target.exists():

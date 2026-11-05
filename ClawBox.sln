@@ -17,6 +17,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ClawBox.Desktop", "src\Claw
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ClawBox.Desktop.Tests", "tests\ClawBox.Desktop.Tests\ClawBox.Desktop.Tests.csproj", "{7442258E-9F44-49D0-9A22-5DA8428992BD}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Quantum.BoxCompanion", "src\Quantum.BoxCompanion\Quantum.BoxCompanion.csproj", "{567FDC57-2ECF-4F1D-9CDF-CA1E95BDA665}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -87,6 +89,18 @@ Global
 		{7442258E-9F44-49D0-9A22-5DA8428992BD}.Release|x64.Build.0 = Release|Any CPU
 		{7442258E-9F44-49D0-9A22-5DA8428992BD}.Release|x86.ActiveCfg = Release|Any CPU
 		{7442258E-9F44-49D0-9A22-5DA8428992BD}.Release|x86.Build.0 = Release|Any CPU
+		{567FDC57-2ECF-4F1D-9CDF-CA1E95BDA665}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{567FDC57-2ECF-4F1D-9CDF-CA1E95BDA665}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{567FDC57-2ECF-4F1D-9CDF-CA1E95BDA665}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{567FDC57-2ECF-4F1D-9CDF-CA1E95BDA665}.Debug|x64.Build.0 = Debug|Any CPU
+		{567FDC57-2ECF-4F1D-9CDF-CA1E95BDA665}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{567FDC57-2ECF-4F1D-9CDF-CA1E95BDA665}.Debug|x86.Build.0 = Debug|Any CPU
+		{567FDC57-2ECF-4F1D-9CDF-CA1E95BDA665}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{567FDC57-2ECF-4F1D-9CDF-CA1E95BDA665}.Release|Any CPU.Build.0 = Release|Any CPU
+		{567FDC57-2ECF-4F1D-9CDF-CA1E95BDA665}.Release|x64.ActiveCfg = Release|Any CPU
+		{567FDC57-2ECF-4F1D-9CDF-CA1E95BDA665}.Release|x64.Build.0 = Release|Any CPU
+		{567FDC57-2ECF-4F1D-9CDF-CA1E95BDA665}.Release|x86.ActiveCfg = Release|Any CPU
+		{567FDC57-2ECF-4F1D-9CDF-CA1E95BDA665}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -97,5 +111,6 @@ Global
 		{333EAC57-CC76-4221-B507-AC68D87B729E} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{785EA3CC-2169-4DCC-9C38-EA182E148E22} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{7442258E-9F44-49D0-9A22-5DA8428992BD} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
+		{567FDC57-2ECF-4F1D-9CDF-CA1E95BDA665} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 	EndGlobalSection
 EndGlobal

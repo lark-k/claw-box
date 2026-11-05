@@ -16,6 +16,8 @@
 
 ## 加密与所有者认证
 
+Quantum 盒子新增 open 模式：任何蓝牙范围内的电脑均可在证明其新公钥后加入，不需要共享密钥；已有电脑的密钥不变。此模式有意放弃用户身份认证，附近设备可以加入、配置 Wi-Fi 并使用模型，撤销单个设备也无法阻止其重新加入。详见 ADR 0025。
+
 规范 JSON 为 Python `json.dumps(sort_keys=True,separators=(',', ':'),ensure_ascii=True)` 的 ASCII/UTF-8 字节。Base64 是 RFC 4648 标准带 padding 编码。SSH 公钥为 OpenSSH `ssh-ed25519 <base64>`，不带注释。哈希 SHA-256，签名 Ed25519，前缀为 ASCII `clawbox-network-v1` 加一个 NUL。
 
 1. 客户端发 `hello`：`op=hello,version=1,mode=claim|resume,owner=<公钥>,nonce=<32随机字节Base64>,ephemeral=<32字节X25519公钥Base64>`。已有配对必须 resume；claim 仅用于用户明确选择的新设备。
@@ -25,6 +27,12 @@
 5. seq=0 的明文为 `{op:authenticate,proof:<签名Base64>}`。proof 是所有者专用密钥对 `前缀 + SHA256(canonical(transcript))` 的签名。首次 claim 成功时登记受限 SSH 公钥；已有配对复用 authorized_keys 中现有受限 `clawbox-reverse-tunnel` 密钥。只知道公钥不能改网；每次业务操作重新检查密钥是否已被撤销。
 
 已绑定设备不重新开放 claim。`/var/lib/clawbox-network/enrolled` 标记确保撤销所有密钥后也不会自动开放。没有远程匿名恢复出厂或解除绑定接口。worker/admin token 都不用于此认证；仅首次桌面初始化会在认证后的加密通道传送受限 worker token，admin token 不经过蓝牙。
+
+### 新电脑加入（Quantum 实验协议）
+
+盒子新增 `mode=join`，供持有盒子 32 字节随机配对密钥的新电脑使用；原 claim 和 resume 保持兼容。密钥保存在 `/var/lib/clawbox-network/join.key`，为 64 位小写十六进制，仅管理员可读；不通过命令行参数传入、不作为明文发送。服务在 hello 响应中附 `join_proof`，其值为 `Base64(HMAC-SHA256(key, PREFIX + b"join-server\0" + canonical(transcript)))`。客户端验证该证明、主机签名及预期设备身份（如已有）后，发送原有 Ed25519 proof 和 `join_proof=Base64(HMAC-SHA256(key, PREFIX + b"join-client\0" + canonical(transcript)))` 的加密 authenticate。服务再次读取配对密钥并校验，追加而不替换受限 SSH 公钥；密钥轮换发生在握手中时拒绝加入。新公钥额外允许连接本机 `127.0.0.1:18792`，旧公钥保持原样。
+
+join 仍供兼容客户端使用。Quantum 桌面新设备改用前述 open 模式，因此撤销单个设备或轮换 join 密钥无法阻止附近设备再次加入。若需要访问控制，必须另行设计并实施授权和撤销流程。
 
 ## 加密业务操作
 
@@ -37,6 +45,7 @@
 | configure | ssid、password，另可含 ssid_bytes、security、hidden | 成功后的 status |
 | connect_saved | ssid，可含 ssid_bytes、security；不得含 password 或其他字段 | 使用板子已保存配置连接后的 status |
 | desktop_setup | worker_token，严格 64 位十六进制 | gateway_token，仅通过加密会话返回 |
+| model_setup | 无其他字段 | 当前公钥独立的模型网关 token、model、port；仅通过认证后的加密会话返回 |
 
 `desktop_setup` 仅在用户点击“连接并开始使用”且桌面配对尚未完成时调用。板端执行随镜像交付的固定插件和桌面初始化脚本，不接受命令、路径或上传源码；不会注册为智能体工具。请求结果未知时不自动重放。普通换网只需 status/scan/configure。
 

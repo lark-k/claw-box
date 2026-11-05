@@ -74,6 +74,19 @@ appsettings.Local.json
 **/authorized_keys
 **/authorized_keys.*
 *.nmconnection
+# Device-specific state, credentials and locally produced user documents.
+**/join.key
+**/model-clients.json
+**/model-gateway.json
+**/box/profile.json
+*.pdf
+*.docx
+*.xlsx
+*.pptx
+*.exe
+*.dll
+*.pdb
+*.zip
 packages/
 Thumbs.db
 .DS_Store

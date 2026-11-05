@@ -2,6 +2,7 @@
 
 import base64
 import hashlib
+import hmac
 import json
 import os
 import secrets
@@ -101,6 +102,21 @@ class Owners:
                  marker=Path("/var/lib/clawbox-network/enrolled")):
         self.authorized, self.marker = Path(authorized), Path(marker)
 
+    def join_secret(self):
+        path = self.marker.parent / "join.key"
+        if path.is_symlink() or not path.is_file():
+            raise ProtocolError("join_unavailable")
+        try:
+            value = path.read_text(encoding="ascii").strip()
+            if len(value) != 64 or value != value.lower():
+                raise ValueError()
+            result = bytes.fromhex(value)
+            if len(result) != 32:
+                raise ValueError()
+            return result
+        except (OSError, UnicodeError, ValueError):
+            raise ProtocolError("join_unavailable") from None
+
     def keys(self):
         import re
         result = set()
@@ -128,19 +144,27 @@ class Owners:
             os.close(descriptor)
 
     def claim(self, public):
+        self._register(public, first=True)
+
+    def join(self, public):
+        self._register(public, first=False)
+
+    def _register(self, public, first):
         import fcntl
         normalized = public_text(owner_key(public))
         self.marker.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         with (self.marker.parent / "enrollment.lock").open("a") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
-            if not self.enrollment_open():
+            if first and not self.enrollment_open():
                 raise ProtocolError("already_bound")
+            if not first and normalized in self.keys():
+                return
             self.authorized.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
             if self.authorized.parent.is_symlink() or self.authorized.is_symlink():
                 raise ProtocolError("unsafe_owner_store")
             existing = self.authorized.read_text() if self.authorized.exists() else ""
             line = ('no-agent-forwarding,no-X11-forwarding,no-pty,no-user-rc,command="/bin/false",'
-                    'permitopen="127.0.0.1:18789",permitopen="127.0.0.1:18791",'
+                    'permitopen="127.0.0.1:18789",permitopen="127.0.0.1:18791",permitopen="127.0.0.1:18792",'
                     'permitlisten="127.0.0.1:18791" ' + normalized + " clawbox-reverse-tunnel\n")
             # Mark first: an interrupted enrollment stays closed instead of reopening to strangers.
             self._mark()
@@ -165,12 +189,13 @@ class Session:
     incoming: bytes
     outgoing: bytes
     created: float
+    join_secret: bytes | None = None
     sequence: int = 0
     authenticated: bool = False
 
 
 class Service:
-    def __init__(self, host_key, owners, network, clock=time.monotonic, desktop=None):
+    def __init__(self, host_key, owners, network, clock=time.monotonic, desktop=None, model=None):
         if not isinstance(host_key, ed25519.Ed25519PrivateKey):
             raise ValueError("An Ed25519 SSH host key is required")
         self.host_key, self.owners, self.network, self.clock = host_key, owners, network, clock
@@ -178,6 +203,7 @@ class Service:
         self.identity = fingerprint(self.public)
         self.sessions = {}
         self.desktop = desktop
+        self.model = model
 
     def disconnect(self, peer):
         self.sessions.pop(peer, None)
@@ -213,6 +239,15 @@ class Service:
                     raise ProtocolError("invalid_signature") from None
                 if session.mode == "claim":
                     self.owners.claim(session.owner)
+                elif session.mode == "open":
+                    self.owners.join(session.owner)
+                elif session.mode == "join":
+                    if not hmac.compare_digest(session.join_secret, self.owners.join_secret()):
+                        raise ProtocolError("invalid_join_proof")
+                    expected = hmac.digest(session.join_secret, PREFIX + b"join-client\0" + session.transcript, "sha256")
+                    if not hmac.compare_digest(decode(request.get("join_proof"), 32), expected):
+                        raise ProtocolError("invalid_join_proof")
+                    self.owners.join(session.owner)
                 elif session.owner not in self.owners.keys():
                     raise ProtocolError("not_owner")
                 session.authenticated = True
@@ -231,6 +266,8 @@ class Service:
                     result = self.network.connect_saved(request)
                 elif operation == "desktop_setup" and self.desktop is not None:
                     result = self.desktop.setup(session.owner, request)
+                elif operation == "model_setup" and self.model is not None:
+                    result = self.model.setup(session.owner)
                 else:
                     raise ProtocolError("unsupported_operation")
             return seal(session.outgoing, session.identifier, "server", sequence, {"ok": True, "result": result})
@@ -245,13 +282,14 @@ class Service:
             self.disconnect(expired)
         if peer not in self.sessions and len(self.sessions) >= MAX_PEERS:
             raise ProtocolError("busy")
-        if request.get("version") != 1 or request.get("mode") not in ("claim", "resume"):
+        if request.get("version") != 1 or request.get("mode") not in ("claim", "resume", "join", "open"):
             raise ProtocolError("invalid_message")
         owner = public_text(owner_key(request.get("owner")))
         if request["mode"] == "claim" and not self.owners.enrollment_open():
             raise ProtocolError("already_bound")
         if request["mode"] == "resume" and owner not in self.owners.keys():
             raise ProtocolError("not_owner")
+        join_secret = self.owners.join_secret() if request["mode"] == "join" else None
         decode(request.get("nonce"), 32)
         try:
             ephemeral = x25519.X25519PublicKey.from_public_bytes(decode(request.get("ephemeral"), 32))
@@ -266,17 +304,25 @@ class Service:
         encoded = canonical(transcript)
         incoming, outgoing = derive(secret, encoded)
         self.sessions[peer] = Session(transcript["session"], owner, request["mode"], encoded,
-                                      incoming, outgoing, self.clock())
-        return {"transcript": transcript, "signature": encode(self.host_key.sign(PREFIX + encoded))}
+                                      incoming, outgoing, self.clock(), join_secret)
+        response = {"transcript": transcript, "signature": encode(self.host_key.sign(PREFIX + encoded))}
+        if join_secret is not None:
+            response["join_proof"] = encode(hmac.digest(join_secret, PREFIX + b"join-server\0" + encoded, "sha256"))
+        return response
 
 
 class Client:
     """No transport or UI; callers must explicitly select a device on first use."""
 
-    def __init__(self, key, expected_identity, claim=False):
+    def __init__(self, key, expected_identity, claim=False, join_secret=None):
+        if claim and join_secret is not None:
+            raise ValueError("claim and join are mutually exclusive")
+        if join_secret is not None and (not isinstance(join_secret, bytes) or len(join_secret) != 32):
+            raise ValueError("join secret must contain 32 bytes")
         self.key, self.expected = key, expected_identity
+        self.join_secret = join_secret
         self.ephemeral = x25519.X25519PrivateKey.generate()
-        self.hello = {"op": "hello", "version": 1, "mode": "claim" if claim else "resume",
+        self.hello = {"op": "hello", "version": 1, "mode": "join" if join_secret is not None else "claim" if claim else "resume",
                       "owner": public_text(key.public_key()), "nonce": encode(secrets.token_bytes(32)),
                       "ephemeral": encode(self.ephemeral.public_key().public_bytes(
                           serialization.Encoding.Raw, serialization.PublicFormat.Raw))}
@@ -291,12 +337,19 @@ class Client:
                 raise ProtocolError("identity_mismatch")
             encoded = canonical(transcript)
             owner_key(public).verify(decode(response["signature"], 64), PREFIX + encoded)
+            if self.join_secret is not None:
+                proof = hmac.digest(self.join_secret, PREFIX + b"join-server\0" + encoded, "sha256")
+                if not hmac.compare_digest(decode(response.get("join_proof"), 32), proof):
+                    raise ProtocolError("invalid_join_proof")
             secret = self.ephemeral.exchange(x25519.X25519PublicKey.from_public_bytes(decode(transcript["ephemeral"], 32)))
             self.outgoing, self.incoming = derive(secret, encoded)
             self.session = transcript["session"]
             self.identity = transcript["identity"]
-            return self.request({"op": "authenticate", "proof": encode(
-                self.key.sign(PREFIX + hashlib.sha256(encoded).digest()))})
+            request = {"op": "authenticate", "proof": encode(
+                self.key.sign(PREFIX + hashlib.sha256(encoded).digest()))}
+            if self.join_secret is not None:
+                request["join_proof"] = encode(hmac.digest(self.join_secret, PREFIX + b"join-client\0" + encoded, "sha256"))
+            return self.request(request)
         except (KeyError, ValueError, InvalidSignature):
             raise ProtocolError("invalid_handshake") from None
 

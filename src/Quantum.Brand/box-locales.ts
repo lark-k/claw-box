@@ -11,6 +11,14 @@ export const en = {
   invalidPort: 'Enter a whole number between 1 and 65535.',
   failed: 'Could not save the configuration. Try again.',
   unavailable: 'Connection settings are unavailable. Reconnect the app and try again.',
+  connected: 'Connected', wired: 'Wired connection', wireless: 'Wireless connection',
+  adminPassword: 'Box administrator password', connect: 'Connect box', disconnect: 'Disconnect',
+  discover: 'Search for nearby boxes', scanning: 'Searching…', selectBox: 'Select a nearby box',
+  noBoxes: 'No boxes found. Check power and Bluetooth, then search again.', pairingCode: 'Box pairing key (for an already paired box)',
+  wifiSsid: 'Current computer Wi-Fi', wifiPassword: 'Wi-Fi password', wifiHint: 'Enter the password for this network; leave blank for an open network.',
+  wiredGuide: 'Connect the box to power and connect its Ethernet port to this computer. Connect the computer to Wi-Fi. In Windows network settings, share the Wi-Fi connection with the Ethernet adapter. If needed, configure the Ethernet adapter as 192.168.137.1 with subnet mask 255.255.255.0. Then enter the box administrator password and connect.',
+  connecting: 'Connecting…', connectionFailed: 'Could not connect the box. Check the details and try again.',
+  desktopOnly: 'Box connections are available in the desktop app.',
 } as const
 export type BoxKey = keyof typeof en
 export const zh: Record<BoxKey, string> = {
@@ -25,4 +33,12 @@ export const zh: Record<BoxKey, string> = {
   invalidPort: '请输入 1 到 65535 之间的整数',
   failed: '配置保存失败，请重试',
   unavailable: '连接设置暂不可用，请重新连接应用后重试',
+  connected: '已连接', wired: '有线连接', wireless: '无线连接',
+  adminPassword: '盒子管理员密码', connect: '连接盒子', disconnect: '断开连接',
+  discover: '搜索附近盒子', scanning: '正在搜索…', selectBox: '选择附近的盒子',
+  noBoxes: '没有发现盒子，请检查电源和蓝牙后重新搜索', pairingCode: '盒子配对密钥（已有电脑配对时填写）',
+  wifiSsid: '电脑当前 Wi-Fi', wifiPassword: 'Wi-Fi 密码', wifiHint: '请输入此网络的密码；开放网络可留空。',
+  wiredGuide: '① 给盒子接通电源，用网线连接盒子和电脑。② 电脑连接 Wi-Fi，在 Windows 网络设置中将 Wi-Fi 共享给连接盒子的以太网网卡。③ 如仍无法连接，将该以太网网卡 IPv4 地址设为 192.168.137.1，子网掩码设为 255.255.255.0，网关留空。④ 输入盒子管理员密码，点击连接。',
+  connecting: '正在连接…', connectionFailed: '盒子连接未完成，请检查连接信息后重试',
+  desktopOnly: '请在桌面应用中连接盒子',
 }

@@ -4,6 +4,8 @@ import argparse
 import hmac
 import http.client
 import json
+from pathlib import Path
+import re
 import socket
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
@@ -25,6 +27,15 @@ class Gateway(ThreadingHTTPServer):
                 raise ValueError(f'{key} must be a nonempty credential without whitespace')
         if address[0] != '127.0.0.1':
             raise ValueError('gateway must bind to 127.0.0.1; use authenticated SSH forwarding')
+        interfaces = config.get('upstreamInterfaces', [])
+        if (not isinstance(interfaces, list) or len(interfaces) > 8 or
+                any(not isinstance(i, str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,15}', i) for i in interfaces)):
+            raise ValueError('upstreamInterfaces must contain valid interface names')
+        if interfaces and not hasattr(socket, 'SO_BINDTODEVICE'):
+            raise ValueError('upstreamInterfaces require Linux SO_BINDTODEVICE')
+        clients = config.get('clientTokensFile')
+        if clients is not None and (not isinstance(clients, str) or not Path(clients).is_absolute()):
+            raise ValueError('clientTokensFile must be an absolute path')
         self.config = config
         self.upstream = upstream
         super().__init__(address, Handler)
@@ -53,9 +64,7 @@ class Handler(BaseHTTPRequestHandler):
         self.relay()
 
     def relay(self):
-        if self.headers.get('Origin') or not hmac.compare_digest(
-                self.headers.get('Authorization', '').encode(),
-                ('Bearer ' + self.server.config['token']).encode()):
+        if self.headers.get('Origin') or not authorized(self.server.config, self.headers.get('Authorization', '')):
             self.error(401, 'unauthorized')
             return
         if (self.command, self.path) not in {('GET', '/v1/models'), ('POST', '/v1/chat/completions')}:
@@ -84,6 +93,9 @@ class Handler(BaseHTTPRequestHandler):
         endpoint = self.server.upstream
         connection_type = http.client.HTTPSConnection if endpoint.scheme == 'https' else http.client.HTTPConnection
         upstream = connection_type(endpoint.hostname, endpoint.port, timeout=300)
+        if self.server.config.get('upstreamInterfaces'):
+            upstream._create_connection = lambda address, timeout, source_address=None: connect_interfaces(
+                address, self.server.config['upstreamInterfaces'], timeout)
         started = False
         try:
             # Fixed target and routes; no client headers, redirects or automatic retries.
@@ -112,6 +124,45 @@ class Handler(BaseHTTPRequestHandler):
             # After headers, close the stream without synthesizing a success/DONE.
         finally:
             upstream.close()
+
+
+def authorized(config, header):
+    candidate = header.encode()
+    if hmac.compare_digest(candidate, ('Bearer ' + config['token']).encode()):
+        return True
+    path = config.get('clientTokensFile')
+    if not path:
+        return False
+    try:
+        source = Path(path)
+        if source.is_symlink() or source.stat().st_size > 256 * 1024:
+            return False
+        clients = json.loads(source.read_text(encoding='utf-8'))
+        if not isinstance(clients, dict) or len(clients) > 1000:
+            return False
+        return any(isinstance(value, str) and 32 <= len(value) <= 128 and
+                   hmac.compare_digest(candidate, ('Bearer ' + value).encode()) for value in clients.values())
+    except (OSError, ValueError, TypeError):
+        return False
+
+
+def connect_interfaces(address, interfaces, timeout):
+    """Try each interface only while connecting; never replay an HTTP request."""
+    last_error = None
+    for interface in interfaces:
+        for family, socktype, proto, _canonname, target in socket.getaddrinfo(
+                address[0], address[1], type=socket.SOCK_STREAM):
+            connection = socket.socket(family, socktype, proto)
+            try:
+                connection.settimeout(min(timeout, 5))
+                connection.setsockopt(socket.SOL_SOCKET, socket.SO_BINDTODEVICE, interface.encode() + b'\0')
+                connection.connect(target)
+                connection.settimeout(timeout)
+                return connection
+            except OSError as error:
+                last_error = error
+                connection.close()
+    raise last_error or OSError('No upstream address available')
 
 
 def main():

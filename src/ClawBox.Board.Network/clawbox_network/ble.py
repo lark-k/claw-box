@@ -20,6 +20,7 @@ from .framing import Frames
 from .network import Network
 from .desktop import DesktopBootstrap
 from .protocol import Owners, ProtocolError, Service, canonical
+from .model import ModelBootstrap
 
 PROPS = "org.freedesktop.DBus.Properties"
 OBJECTS = "org.freedesktop.DBus.ObjectManager"
@@ -151,7 +152,7 @@ def main():
     owners = Owners()
     owners.remember_existing()
     key = serialization.load_ssh_private_key(Path("/etc/ssh/ssh_host_ed25519_key").read_bytes(), password=None)
-    protocol = Service(key, owners, Network(), desktop=DesktopBootstrap())
+    protocol = Service(key, owners, Network(), desktop=DesktopBootstrap(), model=ModelBootstrap())
     bus = dbus.SystemBus()
     manager = dbus.Interface(bus.get_object("org.bluez", "/"), OBJECTS)
     adapters = [path for path, interfaces in manager.GetManagedObjects().items()

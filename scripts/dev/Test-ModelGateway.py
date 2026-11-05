@@ -5,14 +5,13 @@ import importlib.util
 import json
 from pathlib import Path
 import threading
+from types import SimpleNamespace
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--config', required=True)
+parser.add_argument('--existing-port', type=int, help='Test an already running loopback gateway')
 args = parser.parse_args()
 config = json.loads(Path(args.config).read_text(encoding='utf-8-sig'))
-spec = importlib.util.spec_from_file_location('gateway', Path(__file__).parents[2] / 'src/Quantum.ModelGateway/gateway.py')
-module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(module)
 
 
 def completion(server, messages, tools):
@@ -51,9 +50,7 @@ def completion(server, messages, tools):
 tools = [{'type': 'function', 'function': {'name': 'quantum_probe', 'description': 'Return the sum of a and b.',
          'parameters': {'type': 'object', 'properties': {'a': {'type': 'integer'}, 'b': {'type': 'integer'}}, 'required': ['a', 'b']}}}]
 messages = [{'role': 'user', 'content': 'You must call quantum_probe with a=19 and b=23, then report its returned result.'}]
-with module.Gateway(('127.0.0.1', 0), config) as server:
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    try:
+def smoke(server):
         text, calls = completion(server, messages, tools)
         if len(calls) != 1 or calls[0]['function']['name'] != 'quantum_probe':
             raise RuntimeError('Model did not produce the expected tool call')
@@ -66,5 +63,17 @@ with module.Gateway(('127.0.0.1', 0), config) as server:
         if '42' not in text or calls:
             raise RuntimeError('Model did not finish using the supplied tool result')
         print('PASS: real model SSE, tool-call JSON, tool result round trip (42). No credentials logged.')
-    finally:
-        server.shutdown()
+
+
+if args.existing_port:
+    smoke(SimpleNamespace(server_port=args.existing_port))
+else:
+    spec = importlib.util.spec_from_file_location('gateway', Path(__file__).parents[2] / 'src/Quantum.ModelGateway/gateway.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    with module.Gateway(('127.0.0.1', 0), config) as server:
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            smoke(server)
+        finally:
+            server.shutdown()
