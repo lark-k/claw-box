@@ -5,6 +5,24 @@ namespace ClawBox.Desktop.Tests;
 public sealed class QuantumWirelessFlowTests
 {
     [Fact]
+    public void Selecting_a_different_box_uses_its_identity_and_open_enrollment()
+    {
+        var result = QuantumBoxPairing.SelectIdentity("new-device", "old-device", false, true);
+        Assert.Equal("new-device", result.Identity);
+        Assert.True(result.Open);
+        Assert.False(QuantumBoxPairing.SelectIdentity("old-device", "old-device", false, true).Open);
+        Assert.True(QuantumBoxPairing.SelectIdentity("new-device", null, false, true).Open);
+    }
+
+    [Fact]
+    public void Automatic_reconnect_does_not_switch_to_another_box()
+    {
+        var error = Assert.Throws<WirelessException>(() => QuantumBoxPairing.SelectIdentity("different", "original", false, false));
+        Assert.Equal("identity_mismatch", error.Code);
+        Assert.Throws<WirelessException>(() => QuantumBoxPairing.SelectIdentity(null, "original", false, true));
+    }
+
+    [Fact]
     public async Task Adding_a_computer_to_the_same_wifi_does_not_disconnect_or_reconfigure_the_box()
     {
         WirelessStatus current = new(true, ["192.0.2.2"], "Network A", "YQ==");

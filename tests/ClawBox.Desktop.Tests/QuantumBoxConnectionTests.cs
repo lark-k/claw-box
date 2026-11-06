@@ -65,6 +65,37 @@ public sealed class LiveQuantumOpenFactAttribute : FactAttribute
 public sealed class LiveQuantumOpenTests
 {
     [LiveQuantumOpenFact]
+    public async Task Explicit_selection_connects_a_new_box_despite_an_old_saved_identity()
+    {
+        string directory = Environment.GetEnvironmentVariable("QUANTUM_OPEN_TEST_ROOT")!;
+        Directory.CreateDirectory(directory);
+        await File.WriteAllTextAsync(Path.Combine(directory, "profile.json"), JsonSerializer.Serialize(new
+        {
+            host = "192.0.2.1",
+            port = 22,
+            fingerprint = "SHA256:" + new string('A', 43),
+            model = "old-model",
+            token = new string('x', 64)
+        }));
+        using CancellationTokenSource deadline = new(TimeSpan.FromMinutes(3));
+        NearbyBoard[] devices = await BluetoothNetwork.Discover(deadline.Token);
+        Assert.NotEmpty(devices);
+        string fingerprint = Environment.GetEnvironmentVariable("QUANTUM_TEST_BOARD_FINGERPRINT")!;
+        NearbyBoard? target = null;
+        foreach (NearbyBoard device in devices)
+        {
+            using BluetoothNetwork link = await BluetoothNetwork.Connect(device.Address, deadline.Token);
+            if ((await link.Info(deadline.Token)).GetProperty("identity").GetString() == fingerprint) { target = device; break; }
+        }
+        Assert.NotNull(target);
+        using QuantumBoxConnection box = new(directory);
+        QuantumBoxConnection.Status status = await box.PairWireless(target.Address, "192.168.137.2", 22, null, null, deadline.Token);
+        Assert.True(status.Connected);
+        Assert.NotNull(status.Model);
+        Assert.NotNull(status.LocalPort);
+    }
+
+    [LiveQuantumOpenFact]
     public async Task New_identity_enrolls_over_ble_and_reaches_model_tunnel()
     {
         string directory = Environment.GetEnvironmentVariable("QUANTUM_OPEN_TEST_ROOT")!;

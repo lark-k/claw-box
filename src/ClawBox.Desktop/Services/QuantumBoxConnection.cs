@@ -59,10 +59,10 @@ public sealed class QuantumBoxConnection : IDisposable
     }
 
     public async Task<Status> PairWireless(ulong address, string? host, int port, byte[]? joinSecret,
-        QuantumWifiRequest? wifi, CancellationToken cancellation)
+        QuantumWifiRequest? wifi, CancellationToken cancellation, bool selectedByUser = true)
     {
         await BoardSetup.GenerateKey(identity, cancellation);
-        QuantumBoxPairingResult paired = await QuantumBoxPairing.PairWireless(address, identity, profile?.Fingerprint, joinSecret, cancellation, wifi);
+        QuantumBoxPairingResult paired = await QuantumBoxPairing.PairWireless(address, identity, profile?.Fingerprint, joinSecret, cancellation, wifi, selectedByUser);
         string target = string.IsNullOrWhiteSpace(host) ? paired.Addresses.FirstOrDefault(a => System.Net.IPAddress.TryParse(a, out var ip) && ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork) ?? "" : host.Trim();
         Profile next = new() { Host = target, Port = port, Fingerprint = paired.Fingerprint, Model = paired.Model, Token = paired.GatewayToken, ContextWindow = paired.ContextWindow };
         return await RetryWirelessConnection(token => Activate(next, token), cancellation);
@@ -93,7 +93,6 @@ public sealed class QuantumBoxConnection : IDisposable
         string[] parts = observed.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
         if (parts.Length != 3) throw new InvalidOperationException("无法确认盒子身份。");
         string fingerprint = WirelessBinding.Fingerprint(parts[1] + " " + parts[2]);
-        if (profile is not null && profile.Fingerprint != fingerprint) throw new WirelessException("identity_mismatch");
         string[] publicParts = File.ReadAllText(identity + ".pub").Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
         if (publicParts.Length < 2 || publicParts[0] != "ssh-ed25519" || !Regex.IsMatch(publicParts[1], @"^[A-Za-z0-9+/=]+$"))
             throw new InvalidOperationException("本机配对公钥无效。");
@@ -138,7 +137,7 @@ public sealed class QuantumBoxConnection : IDisposable
             catch (WirelessException) { throw new RuntimeStartupException(error.Kind, error.Message); }
             foreach (NearbyBoard board in boards)
             {
-                try { return await PairWireless(board.Address, null, profile.Port, null, null, cancellation); }
+                try { return await PairWireless(board.Address, null, profile.Port, null, null, cancellation, selectedByUser: false); }
                 catch (WirelessException mismatch) when (mismatch.Code == "identity_mismatch") { }
             }
             throw;

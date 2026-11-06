@@ -26,16 +26,15 @@ public sealed class QuantumWifiRequest(string ssid, string password, string secu
 public static class QuantumBoxPairing
 {
     public static async Task<QuantumBoxPairingResult> PairWireless(
-        ulong address, string identityFile, string? expectedIdentity, byte[]? joinSecret, CancellationToken cancellation, QuantumWifiRequest? wifi = null)
+        ulong address, string identityFile, string? expectedIdentity, byte[]? joinSecret, CancellationToken cancellation, QuantumWifiRequest? wifi = null, bool selectedByUser = false)
     {
         BluetoothNetwork link = await BluetoothNetwork.Connect(address, cancellation);
         try
         {
             JsonElement info = await link.Info(cancellation);
             string? observed = info.GetProperty("identity").GetString();
-            if (expectedIdentity is not null && observed != expectedIdentity) throw new WirelessException("identity_mismatch");
-            bool open = expectedIdentity is null && joinSecret is null;
-            using WirelessSession session = new(link, new WirelessProtocol(identityFile, expectedIdentity, false, joinSecret, open));
+            (string selectedIdentity, bool open) = SelectIdentity(observed, expectedIdentity, joinSecret is not null, selectedByUser);
+            using WirelessSession session = new(link, new WirelessProtocol(identityFile, selectedIdentity, false, joinSecret, open));
             await session.Authenticate(cancellation);
             WirelessStatus status = await EnsureWifi(wifi, session.Status, session.Scan, async (network, request, token) =>
             {
@@ -51,6 +50,14 @@ public static class QuantumBoxPairing
             return new(session.Identity, session.HostKey, status.Addresses, name, token, context);
         }
         catch { link.Dispose(); throw; }
+    }
+
+    internal static (string Identity, bool Open) SelectIdentity(string? observed, string? expected, bool hasJoinSecret, bool selectedByUser)
+    {
+        if (string.IsNullOrWhiteSpace(observed)) throw new WirelessException("identity_mismatch");
+        bool changed = expected is not null && observed != expected;
+        if (changed && !selectedByUser) throw new WirelessException("identity_mismatch");
+        return (observed, !hasJoinSecret && (expected is null || changed));
     }
 
     // A matching live network must not be disconnected merely to add another computer.
