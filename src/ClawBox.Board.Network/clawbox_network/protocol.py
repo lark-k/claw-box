@@ -228,6 +228,7 @@ class Service:
             raise
         # Consume before dispatch, including failures: reconnect never replays a write.
         session.sequence += 1
+        session.created = self.clock()
         try:
             if not session.authenticated:
                 if sequence != 0 or request.get("op") != "authenticate":
@@ -282,6 +283,8 @@ class Service:
             self.disconnect(expired)
         if peer not in self.sessions and len(self.sessions) >= MAX_PEERS:
             raise ProtocolError("busy")
+        if peer in self.sessions:
+            self.disconnect(peer)
         if request.get("version") != 1 or request.get("mode") not in ("claim", "resume", "join", "open"):
             raise ProtocolError("invalid_message")
         owner = public_text(owner_key(request.get("owner")))

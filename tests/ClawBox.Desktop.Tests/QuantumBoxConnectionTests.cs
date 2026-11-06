@@ -1,4 +1,7 @@
 using System.Text.Json;
+using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Text;
 using ClawBox.Desktop.Services;
 
 namespace ClawBox.Desktop.Tests;

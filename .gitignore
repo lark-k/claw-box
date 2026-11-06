@@ -79,6 +79,7 @@ appsettings.Local.json
 **/model-clients.json
 **/model-gateway.json
 **/box/profile.json
+/docs/Quantum Harness 使用说明书.md
 *.pdf
 *.docx
 *.xlsx

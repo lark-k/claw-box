@@ -51,6 +51,7 @@ static object Describe(QuantumBoxConnection.Status status) => new
     model = status.Model,
     localPort = status.LocalPort,
     contextWindow = status.ContextWindow,
+    connectionMode = status.ConnectionMode,
     // This token is for the current computer only and travels solely over the parent pipe.
     token = status.Token,
 };

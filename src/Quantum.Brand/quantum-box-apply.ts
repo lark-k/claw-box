@@ -41,8 +41,8 @@ export function applyQuantumBox(ctx: Context): void {
       if (observedConnected) { await removeModel(); observedConnected = false }
       return value
     }
-    if (request.op === 'status') return { connected: true }
-    const status = value as { connected: boolean; host?: string; model?: string; localPort?: number; token?: string; contextWindow?: number }
+    if (request.op === 'status') return { connected: true, connectionMode: 'connectionMode' in value ? value.connectionMode : undefined }
+    const status = value as { connected: boolean; host?: string; model?: string; localPort?: number; token?: string; contextWindow?: number; connectionMode?: string }
     if (typeof status.token !== 'string' || typeof status.model !== 'string' || !Number.isInteger(status.localPort)) throw new Error('盒子模型信息无效')
     const credential = await ctx.remote.credentials.set('QUANTUM_BOX_DEVICE_API_KEY', status.token)
     if (!credential.ok) throw new Error('保存盒子模型凭据失败')
@@ -59,7 +59,7 @@ export function applyQuantumBox(ctx: Context): void {
     ], undefined)
     if (!selection.ok) throw new Error('选择盒子模型失败')
     observedConnected = true
-    return { connected: true, host: status.host, model: status.model, localPort: status.localPort }
+    return { connected: true, host: status.host, model: status.model, localPort: status.localPort, connectionMode: status.connectionMode }
   }
   const injected = (): BoxInjected => ({
     hooks: { box: form },

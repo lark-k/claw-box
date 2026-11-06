@@ -27,6 +27,7 @@ export function BoxEditor({ useBox, save, call, t }: EditorProps) {
   const [message, setMessage] = useState<BoxKey>()
   const [connectionError, setConnectionError] = useState('')
   const [connected, setConnected] = useState(false)
+  const [connectionMode, setConnectionMode] = useState('')
   const [mode, setMode] = useState<'wired' | 'wireless'>('wired')
   const [password, setPassword] = useState('')
   const [ssid, setSsid] = useState('')
@@ -36,7 +37,10 @@ export function BoxEditor({ useBox, save, call, t }: EditorProps) {
   useEffect(() => {
     let active = true
     const refresh = () => { if (call !== undefined) void call({ op: 'status' }).then(value => {
-      if (active && typeof value === 'object' && value !== null && 'connected' in value) setConnected(value.connected === true)
+      if (active && typeof value === 'object' && value !== null && 'connected' in value) {
+        setConnected(value.connected === true)
+        setConnectionMode('connectionMode' in value && typeof value.connectionMode === 'string' ? value.connectionMode : '')
+      }
     }).catch(() => {}) }
     refresh()
     const timer = setInterval(refresh, 5000)
@@ -69,9 +73,10 @@ export function BoxEditor({ useBox, save, call, t }: EditorProps) {
         if (found.length === 0) setMessage('noBoxes')
       } else if (typeof value === 'object' && value !== null && 'connected' in value) {
         setConnected(value.connected === true)
+        setConnectionMode('connectionMode' in value && typeof value.connectionMode === 'string' ? value.connectionMode : '')
       }
     } catch (error) {
-      setConnectionError(error instanceof Error ? error.message : t('connectionFailed'))
+      setConnectionError(error instanceof Error ? error.message.replace(/^Error invoking remote method 'quantum-box:call': Error: /u, '') : t('connectionFailed'))
     } finally { setBusy(false); if (request.op !== 'discover') { setPassword(''); setWifiPassword('') } }
   }
   const chooseWireless = async () => {
@@ -84,7 +89,7 @@ export function BoxEditor({ useBox, save, call, t }: EditorProps) {
   return <div className={css.editor}>
     <div className={css.device}>
       <span className={css.deviceIcon}><IconLinkOutlineRegular size={22} /></span>
-      <div><h3>{t('heading')}</h3><span className={css.status}>{t(connected ? 'connected' : 'status')}</span></div>
+      <div><h3>{t('heading')}</h3><span className={css.status}>{t(connected ? connectionMode === 'wifi' ? 'connectedNetwork' : 'connected' : 'status')}</span></div>
     </div>
     <p className={css.description}>{t('description')}</p>
     {call === undefined && <p className={css.pending}>{t('pending')}</p>}

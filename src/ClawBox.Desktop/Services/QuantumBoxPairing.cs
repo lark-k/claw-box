@@ -37,14 +37,10 @@ public static class QuantumBoxPairing
             bool open = expectedIdentity is null && joinSecret is null;
             using WirelessSession session = new(link, new WirelessProtocol(identityFile, expectedIdentity, false, joinSecret, open));
             await session.Authenticate(cancellation);
-            if (wifi is not null)
+            WirelessStatus status = await EnsureWifi(wifi, session.Status, session.Scan, async (network, request, token) =>
             {
-                WirelessNetwork[] networks = await session.Scan(cancellation);
-                WirelessNetwork? match = networks.FirstOrDefault(network => network.Bytes == wifi.SsidBytes);
-                if (match is null) throw new CurrentWifiException("盒子未发现电脑当前的 Wi-Fi，请检查信号和频段。");
-                await session.Send(new { op = "configure", ssid = match.Ssid, ssid_bytes = match.Bytes, password = wifi.Password, security = wifi.Security, hidden = false }, cancellation);
-            }
-            WirelessStatus status = await session.Status(cancellation);
+                await session.Send(new { op = "configure", ssid = network.Ssid, ssid_bytes = network.Bytes, password = request.Password, security = request.Security, hidden = false }, token);
+            }, cancellation);
             JsonElement model = await session.Send(new { op = "model_setup" }, cancellation);
             string? name = model.GetProperty("model").GetString();
             string? token = model.GetProperty("token").GetString();
@@ -55,5 +51,22 @@ public static class QuantumBoxPairing
             return new(session.Identity, session.HostKey, status.Addresses, name, token, context);
         }
         catch { link.Dispose(); throw; }
+    }
+
+    // A matching live network must not be disconnected merely to add another computer.
+    internal static async Task<WirelessStatus> EnsureWifi(QuantumWifiRequest? wifi,
+        Func<CancellationToken, Task<WirelessStatus>> readStatus,
+        Func<CancellationToken, Task<WirelessNetwork[]>> scan,
+        Func<WirelessNetwork, QuantumWifiRequest, CancellationToken, Task> configure,
+        CancellationToken cancellation)
+    {
+        WirelessStatus current = await readStatus(cancellation);
+        if (wifi is null || current.Connected && wifi.SsidBytes is not null && current.SsidBytes == wifi.SsidBytes)
+            return current;
+        WirelessNetwork[] networks = await scan(cancellation);
+        WirelessNetwork? match = networks.FirstOrDefault(network => network.Bytes == wifi.SsidBytes);
+        if (match is null) throw new CurrentWifiException("盒子未发现电脑当前的 Wi-Fi，请检查信号和频段。");
+        await configure(match, wifi, cancellation);
+        return await readStatus(cancellation);
     }
 }

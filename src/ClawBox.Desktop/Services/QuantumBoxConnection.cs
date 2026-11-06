@@ -21,13 +21,14 @@ public sealed class QuantumBoxConnection : IDisposable
         public string Token { get; set; } = "";
         public int? ContextWindow { get; set; }
     }
-    public sealed class Status(bool connected, string? host, string? model, uint? localPort, string? token, int? contextWindow = null)
+    public sealed class Status(bool connected, string? host, string? model, uint? localPort, string? token, int? contextWindow = null, string? connectionMode = null)
     {
         public bool Connected { get; } = connected;
         public string? Host { get; } = host;
         public string? Model { get; } = model;
         public uint? LocalPort { get; } = localPort;
         public int? ContextWindow { get; } = contextWindow;
+        public string? ConnectionMode { get; } = connectionMode;
         [JsonIgnore] public string? Token { get; } = token;
     }
     private readonly string root, identity, profilePath;
@@ -50,8 +51,12 @@ public sealed class QuantumBoxConnection : IDisposable
         }
     }
 
-    public Status GetStatus() => new(tunnel?.Alive == true, profile?.Host, profile?.Model,
-        tunnel?.Alive == true ? tunnel.LocalPort : null, tunnel?.Alive == true ? profile?.Token : null, profile?.ContextWindow);
+    public Status GetStatus()
+    {
+        bool ssh = tunnel?.Alive == true;
+        return new(ssh, profile?.Host, profile?.Model, ssh ? tunnel!.LocalPort : null,
+            ssh ? profile?.Token : null, profile?.ContextWindow, ssh ? "wifi" : null);
+    }
 
     public async Task<Status> PairWireless(ulong address, string? host, int port, byte[]? joinSecret,
         QuantumWifiRequest? wifi, CancellationToken cancellation)
@@ -60,7 +65,23 @@ public sealed class QuantumBoxConnection : IDisposable
         QuantumBoxPairingResult paired = await QuantumBoxPairing.PairWireless(address, identity, profile?.Fingerprint, joinSecret, cancellation, wifi);
         string target = string.IsNullOrWhiteSpace(host) ? paired.Addresses.FirstOrDefault(a => System.Net.IPAddress.TryParse(a, out var ip) && ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork) ?? "" : host.Trim();
         Profile next = new() { Host = target, Port = port, Fingerprint = paired.Fingerprint, Model = paired.Model, Token = paired.GatewayToken, ContextWindow = paired.ContextWindow };
-        return await Activate(next, cancellation);
+        return await RetryWirelessConnection(token => Activate(next, token), cancellation);
+    }
+
+    // Retry only connection establishment, not BLE configuration or model requests.
+    internal static async Task<T> RetryWirelessConnection<T>(Func<CancellationToken, Task<T>> connect,
+        CancellationToken cancellation, Func<TimeSpan, CancellationToken, Task>? delay = null)
+    {
+        delay ??= Task.Delay;
+        for (int attempt = 0; ; attempt++)
+        {
+            cancellation.ThrowIfCancellationRequested();
+            try { return await connect(cancellation); }
+            catch (RuntimeStartupException error) when (error.Kind == StartupFailureKind.Network && attempt < 3)
+            {
+                await delay(TimeSpan.FromSeconds(2 * (attempt + 1)), cancellation);
+            }
+        }
     }
 
     public async Task<Status> PairWired(string host, int port, string password, CancellationToken cancellation)
@@ -106,8 +127,23 @@ public sealed class QuantumBoxConnection : IDisposable
         return await Activate(next, cancellation);
     }
 
-    public Task<Status> Reconnect(CancellationToken cancellation)
-        => profile is null ? Task.FromResult(GetStatus()) : Activate(profile, cancellation);
+    public async Task<Status> Reconnect(CancellationToken cancellation)
+    {
+        if (profile is null) return GetStatus();
+        try { return await Activate(profile, cancellation); }
+        catch (RuntimeStartupException error) when (error.Kind == StartupFailureKind.Network)
+        {
+            NearbyBoard[] boards;
+            try { boards = await BluetoothNetwork.Discover(cancellation); }
+            catch (WirelessException) { throw new RuntimeStartupException(error.Kind, error.Message); }
+            foreach (NearbyBoard board in boards)
+            {
+                try { return await PairWireless(board.Address, null, profile.Port, null, null, cancellation); }
+                catch (WirelessException mismatch) when (mismatch.Code == "identity_mismatch") { }
+            }
+            throw;
+        }
+    }
 
     private async Task<Status> Activate(Profile next, CancellationToken cancellation)
     {
@@ -116,7 +152,7 @@ public sealed class QuantumBoxConnection : IDisposable
         try
         {
             await candidate.Connect(cancellation);
-            using HttpClient http = new() { Timeout = TimeSpan.FromSeconds(30) };
+            using HttpClient http = new(new SocketsHttpHandler { UseProxy = false, AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(30) };
             http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", next.Token);
             using HttpResponseMessage response = await http.GetAsync($"http://127.0.0.1:{candidate.LocalPort}/v1/models", cancellation);
             response.EnsureSuccessStatusCode();

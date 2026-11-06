@@ -149,6 +149,12 @@ class ProtocolTests(unittest.TestCase):
         reply = client.receive(self.server.exchange("a", client.request({"op": "model_setup"})))
         self.assertEqual("not_owner", reply["error"])
 
+    def test_model_traffic_cannot_use_bluetooth(self):
+        client = self.connect()
+        for op in ("model_tunnel_open", "model_tunnel_read", "model_tunnel_write", "model_tunnel_close"):
+            reply = client.receive(self.server.exchange("a", client.request({"op": op})))
+            self.assertEqual("unsupported_operation", reply["error"])
+
     def test_owner_signature_required(self):
         client = Client(self.owner, self.server.identity)
         auth = client.accept(self.server.exchange("a", client.hello))

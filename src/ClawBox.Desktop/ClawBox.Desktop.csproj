@@ -18,6 +18,9 @@
     <ProjectReference Include="../ClawBox.Contracts/ClawBox.Contracts.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="ClawBox.Desktop.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <EmbeddedResource Include="../../scripts/board/inspect-desktop.py" Link="SetupAssets/inspect-desktop.py" />
     <EmbeddedResource Include="../../scripts/board/inspect-network.py" Link="SetupAssets/inspect-network.py" />
     <EmbeddedResource Include="../../scripts/board/pair-desktop.py" Link="SetupAssets/pair-desktop.py" />

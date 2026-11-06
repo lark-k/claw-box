@@ -11,6 +11,7 @@ public sealed class QuantumModelTunnel : IDisposable
     private readonly PrivateKeyFile key;
     private readonly SshClient client;
     private readonly ForwardedPortLocal forward;
+    private readonly string endpoint;
     private bool identityMismatch;
     private int disposed;
 
@@ -20,6 +21,7 @@ public sealed class QuantumModelTunnel : IDisposable
     public QuantumModelTunnel(string host, int port, string fingerprint, string identityFile)
     {
         new SetupRequest(host, port, fingerprint).Validate();
+        endpoint = $"{host}:{port}";
         if (!Path.IsPathFullyQualified(identityFile) || !File.Exists(identityFile)) throw new ArgumentException("Identity file is unavailable.", nameof(identityFile));
         key = new(identityFile);
         ConnectionInfo info = new(host, port, "root", new PrivateKeyAuthenticationMethod("root", key))
@@ -51,7 +53,11 @@ public sealed class QuantumModelTunnel : IDisposable
             if (cancellation.IsCancellationRequested) throw new OperationCanceledException(cancellation);
             if (error is SshAuthenticationException) throw new RuntimeStartupException(StartupFailureKind.Authentication, "盒子未授权当前电脑，请重新配对。");
             if (error is SshConnectionException && identityMismatch) throw new RuntimeStartupException(StartupFailureKind.HostKey, "盒子身份与原配对不一致，连接已停止。");
-            if (error is SshException or SocketException) throw new RuntimeStartupException(StartupFailureKind.Network, "无法连接盒子模型服务，请检查盒子和网络。");
+            if (error is SshException or SocketException)
+            {
+                string reason = error is SocketException socket ? socket.SocketErrorCode.ToString() : error.GetType().Name;
+                throw new RuntimeStartupException(StartupFailureKind.Network, $"无法建立盒子 SSH 连接（{endpoint}，{reason}）。请确认电脑和盒子连接同一 Wi-Fi，且网络允许设备互访；如果使用代理，请检查局域网直连设置。");
+            }
             throw;
         }
     }
