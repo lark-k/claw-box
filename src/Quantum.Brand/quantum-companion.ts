@@ -3,7 +3,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { join } from 'node:path'
 
-const operations = new Set(['status', 'reconnect', 'disconnect', 'discover', 'current-wifi', 'pair-wired', 'pair-wireless'])
+const operations = new Set(['status', 'models', 'reconnect', 'disconnect', 'discover', 'current-wifi', 'pair-wired', 'pair-wireless'])
 type Pending = { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: NodeJS.Timeout }
 
 export class QuantumCompanion {

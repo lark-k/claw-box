@@ -19,6 +19,10 @@ export function applyQuantumBox(ctx: Context): void {
   const t = ctx.locale.bind('settings.box')
   const form = ctx.configForms.get<BoxSettings>('ui-settings-account')
   let observedConnected = false
+  let generation = 0
+  let refreshing = false
+  let lastModels = ''
+  let lastRefresh = 0
   const removeModel = async () => {
     const removed = await ctx.remote.settings.mutate('llm-pi-ai', [
       { op: 'unset', path: ['providers', 'quantum-box-device'] },
@@ -32,8 +36,10 @@ export function applyQuantumBox(ctx: Context): void {
     if (bridge === undefined) throw new Error('请在桌面应用中连接盒子')
     const value = await bridge.call(request)
     if (request.op === 'disconnect') {
+      generation++
       await removeModel()
       observedConnected = false
+      lastModels = ''
       return value
     }
     if (typeof value !== 'object' || value === null || !('connected' in value)) return value
@@ -41,25 +47,48 @@ export function applyQuantumBox(ctx: Context): void {
       if (observedConnected) { await removeModel(); observedConnected = false }
       return value
     }
-    if (request.op === 'status') return { connected: true, connectionMode: 'connectionMode' in value ? value.connectionMode : undefined }
+    if (request.op === 'status') {
+      if (observedConnected && Date.now() - lastRefresh >= 30000 && !refreshing) {
+        refreshing = true
+        try { await refreshModels(bridge, false) } finally { refreshing = false }
+      }
+      return { connected: true, connectionMode: 'connectionMode' in value ? value.connectionMode : undefined }
+    }
     const status = value as { connected: boolean; host?: string; model?: string; localPort?: number; token?: string; contextWindow?: number; connectionMode?: string }
     if (typeof status.token !== 'string' || typeof status.model !== 'string' || !Number.isInteger(status.localPort)) throw new Error('盒子模型信息无效')
     const credential = await ctx.remote.credentials.set('QUANTUM_BOX_DEVICE_API_KEY', status.token)
     if (!credential.ok) throw new Error('保存盒子模型凭据失败')
+    activeStatus = status
+    observedConnected = true
+    lastModels = ''
+    await refreshModels(bridge, true)
+    return { connected: true, host: status.host, model: status.model, localPort: status.localPort, connectionMode: status.connectionMode }
+  }
+  let activeStatus: { localPort?: number; contextWindow?: number } = {}
+  const refreshModels = async (bridge: { call: (value: unknown) => Promise<unknown> }, select: boolean) => {
+    const revision = generation
+    const value = await bridge.call({ op: 'models' })
+    if (!Array.isArray(value) || value.some(id => typeof id !== 'string' || id.length === 0 || id.length > 290)) throw new Error('盒子模型列表无效')
+    if (revision !== generation || !observedConnected) return
+    const ids = [...new Set(value as string[])]
+    const signature = JSON.stringify([activeStatus.localPort, activeStatus.contextWindow, ids])
+    lastRefresh = Date.now()
+    if (signature === lastModels) return
     const provider = await ctx.remote.settings.mutate('llm-pi-ai', [{ op: 'set', path: ['providers', 'quantum-box-device'], value: {
       displayName: 'Quantum Box', apiKeyEnv: 'QUANTUM_BOX_DEVICE_API_KEY', api: 'openai-completions',
-      baseURL: `http://127.0.0.1:${status.localPort}/v1`,
+      baseURL: `http://127.0.0.1:${activeStatus.localPort}/v1`,
       compat: { supportsDeveloperRole: false, maxTokensField: 'max_tokens', thinkingFormat: 'chat-template', chatTemplateKwargs: { enable_thinking: { $var: 'thinking.enabled' } } },
-      models: [{ id: status.model, input: ['text'], reasoningEfforts: { off: null, medium: 'medium' }, ...(status.contextWindow ? { contextWindow: status.contextWindow } : {}) }],
+      models: ids.map(id => ({ id, input: ['text', 'image'], reasoningEfforts: { off: null, medium: 'medium' }, ...(activeStatus.contextWindow ? { contextWindow: activeStatus.contextWindow } : {}) })),
     } }], undefined)
     if (!provider.ok) throw new Error('配置盒子模型失败')
-    const selection = await ctx.remote.settings.mutate('agent-default-model', [
-      { op: 'set', path: ['provider'], value: 'quantum-box-device' }, { op: 'set', path: ['model'], value: status.model },
-      { op: 'unset', path: ['reasoningEffort'] },
-    ], undefined)
-    if (!selection.ok) throw new Error('选择盒子模型失败')
-    observedConnected = true
-    return { connected: true, host: status.host, model: status.model, localPort: status.localPort, connectionMode: status.connectionMode }
+    lastModels = signature
+    if (select && ids.length > 0) {
+      const selection = await ctx.remote.settings.mutate('agent-default-model', [
+        { op: 'set', path: ['provider'], value: 'quantum-box-device' }, { op: 'set', path: ['model'], value: ids[0]! },
+        { op: 'unset', path: ['reasoningEffort'] },
+      ], undefined)
+      if (!selection.ok) throw new Error('选择盒子模型失败')
+    }
   }
   const injected = (): BoxInjected => ({
     hooks: { box: form },

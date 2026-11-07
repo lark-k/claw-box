@@ -85,6 +85,7 @@ appsettings.Local.json
 *.xlsx
 *.pptx
 *.exe
+*.exe.blockmap
 *.dll
 *.pdb
 *.zip

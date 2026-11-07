@@ -18,6 +18,7 @@ while (await Console.In.ReadLineAsync() is string line)
         object result = op switch
         {
             "status" => Describe(box.GetStatus()),
+            "models" => await box.ListModels(timeout.Token),
             "reconnect" => Describe(await box.Reconnect(timeout.Token)),
             "disconnect" => Disconnect(box),
             "discover" => (await BluetoothNetwork.Discover(timeout.Token)).Select(d => new { address = d.Address.ToString(), name = d.Name, signal = d.Signal }).ToArray(),

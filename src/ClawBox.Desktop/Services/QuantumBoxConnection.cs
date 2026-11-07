@@ -58,6 +58,24 @@ public sealed class QuantumBoxConnection : IDisposable
             ssh ? profile?.Token : null, profile?.ContextWindow, ssh ? "wifi" : null);
     }
 
+    // Discovery is performed through the authenticated SSH tunnel; no server credential reaches Windows.
+    public async Task<string[]> ListModels(CancellationToken cancellation)
+    {
+        QuantumModelTunnel current = tunnel ?? throw new InvalidOperationException("盒子未连接。");
+        Profile active = profile ?? throw new InvalidOperationException("盒子未连接。");
+        using HttpClient http = new(new SocketsHttpHandler { UseProxy = false, AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(20) };
+        http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", active.Token);
+        using HttpResponseMessage response = await http.GetAsync($"http://127.0.0.1:{current.LocalPort}/v1/models", cancellation);
+        response.EnsureSuccessStatusCode();
+        byte[] bytes = await response.Content.ReadAsByteArrayAsync(cancellation);
+        if (bytes.Length > 1024 * 1024) throw new InvalidOperationException("盒子模型列表过大。");
+        using JsonDocument data = JsonDocument.Parse(bytes);
+        return data.RootElement.GetProperty("data").EnumerateArray()
+            .Select(item => item.GetProperty("id").GetString())
+            .Where(id => !string.IsNullOrWhiteSpace(id) && id.Length <= 290 && !id.Any(char.IsControl))
+            .Select(id => id!).Distinct(StringComparer.Ordinal).Take(64).ToArray();
+    }
+
     public async Task<Status> PairWireless(ulong address, string? host, int port, byte[]? joinSecret,
         QuantumWifiRequest? wifi, CancellationToken cancellation, bool selectedByUser = true)
     {

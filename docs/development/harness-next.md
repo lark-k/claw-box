@@ -34,6 +34,24 @@ python -B src/Quantum.ModelGateway/gateway.py --config '<私有配置绝对路�
 
 网关仅监听 127.0.0.1。部署到盒子后通过核验主机身份的 SSH 本地转发访问；需为新端口配置专门的转发授权，不能沿用旧密钥配置并假定已经可用。本地开发可直接运行网关验证真实服务器；此方式没有经过盒子。
 
+多服务器模式在同一私有配置中增加 `upstreams` 数组，每项包含稳定的 `id`、`upstream`（以 `/v1` 结尾）和 `upstreamToken`；保留原有 `model` 字段供现有配对协议使用。示例使用占位符，不包含实际密钥：
+
+```json
+{
+  "model": "legacy-bootstrap-model",
+  "contextWindow": 262144,
+  "token": "replace-with-paired-client-credential",
+  "clientTokensFile": "/var/lib/clawbox-network/model-clients.json",
+  "allowHttp": false,
+  "upstreams": [
+    { "id": "server1", "upstream": "https://model-one.example/v1", "upstreamToken": "replace-with-server-one-credential" },
+    { "id": "server2", "upstream": "https://model-two.example/v1", "upstreamToken": "replace-with-server-two-credential" }
+  ]
+}
+```
+
+模型标识以 `服务器ID::上游模型ID` 区分同名模型。盒子约每 20 秒刷新服务目录，桌面连接后约每 30 秒同步列表；上游 `/v1/models` 失败时不列出该服务器的模型。列表可访问不保证推理、图片或工具调用可用。服务器仅更换模型时，只要服务地址和凭据不变且 `/v1/models` 返回新模型，列表会自动更新；地址、密钥或服务协议发生变化需更新私有配置并重启服务。网关不对已发送的模型请求进行自动重试。多模型声明文本和图片输入，音视频等其他输入类型需要单独实现与验收。
+
 ```powershell
 python -B scripts/dev/Test-ModelGateway.py --config '<私有配置绝对路径>'
 python -B -m unittest discover -s tests/Quantum.ModelGateway.Tests -p 'test_*.py'
